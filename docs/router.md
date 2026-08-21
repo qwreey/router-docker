@@ -189,7 +189,7 @@ SPA에만 있습니다).
 `/router/api/...`로 통과시킵니다(예: `/router/api/tailscale/state`). 제공하는 것:
 
 - Tailscale 전체 CRUD — `GET`/`PUT /api/tailscale/config`(SOCKS 주소/재시도 간격),
-  `GET`/`POST`/`DELETE /api/tailscale/forwards[/{name}]`, 같은 패턴의
+  `GET`/`POST`/`PUT`/`DELETE /api/tailscale/forwards[/{name}]`, 같은 패턴의
   `/api/tailscale/publish[/{name}]`, `GET /api/tailscale/status`(self/peer 정보),
   `POST /api/tailscale/login/{start,cancel}`. webmanager의 Tailscale 탭과 `/router/`
   SPA의 Tailscale 탭이 여기로 요청을 보냅니다. 기존 `GET /api/tailscale/state`
@@ -224,8 +224,8 @@ SPA에만 있습니다).
 
 ### router-manager 자체 인증
 
-router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish/login의
-`POST`/`DELETE`, dev-proxy expose와 app-routes 앱의 `POST`/`PUT`/`DELETE`, tinyauth
+router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish의
+`POST`/`PUT`/`DELETE`, login의 `POST`, dev-proxy expose와 app-routes 앱의 `POST`/`PUT`/`DELETE`, tinyauth
 사용자 CRUD, DNS 블록리스트 소스/custom hosts/resolver의 `POST`/`PUT`/`DELETE`, netgate
 "Net 관리" 탭의 outbound/forwards `PUT`/`POST`/`DELETE`, 대역폭 제한
 `PUT /api/netgate/bandwidth`)는 비밀번호 게이트로
@@ -311,9 +311,8 @@ router-manager에 직접 연결합니다(SPA + API 전부) — 그 도메인에�
 webmanager 쪽에서 같은 origin으로 직접 렌더링하는 `Direct` 폴백이 있었지만,
 router와 webmanager를 완전히 독립적인 배포 단위로 만들기 위해
 제거했습니다 — 자세한 배경은
-[`.claude/archive/router-frontend-decouple-plan-done.md`](../.claude/archive/router-frontend-decouple-plan-done.md)와
 [`.claude/net-auth-expansion-plan.md`](../.claude/net-auth-expansion-plan.md)의
-6번 항목). `GET /router/api/auth/status`의 `trustedHosts`를 읽어 `ROUTER_MANAGER_HOSTS`가
+5번 항목). `GET /router/api/auth/status`의 `trustedHosts`를 읽어 `ROUTER_MANAGER_HOSTS`가
 설정되어 있으면 그 전용 도메인으로 향하는 cross-origin iframe을, 비어있으면(기본)
 같은 origin의 `/router/`로 향하는 iframe을 씁니다 — 두 경우 다 iframe이라는
 점만 같고, 실제로 이 탭들의 쿠키 문제를 닫는 건 여전히 `ROUTER_MANAGER_HOSTS`를
@@ -348,7 +347,8 @@ docker-compose.yml 토폴로지에 관련된 값은 그대로 저장소 루트
 `example-env`에 남아 있습니다.
 
 webmanager의 `--env-migrate`와 완전히 같은 도구(공유 Go 모듈
-`code-docker/envmigrate`)로 동작합니다 — 이미지를 업데이트한 뒤 기존
+`github.com/qwreey/envmigrate`, 각자 자기 자신의 서브모듈로 물고 있습니다)로
+동작합니다 — 이미지를 업데이트한 뒤 기존
 `.env.router`를 최신 키 구조로 재구성하려면:
 
 ```sh

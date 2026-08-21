@@ -228,7 +228,7 @@ The old per-feature code-docker-nginx locations (`/tailscale/`, `/dev-proxy/`,
 `/router-auth/`) are gone — code-docker isn't even attached to `code-docker-external`
 anymore, so it was never a legitimate proxy point for this. Routes router-manager serves:
 full tailscale CRUD (`GET`/`PUT
-/api/tailscale/config`, `GET`/`POST`/`DELETE /api/tailscale/forwards[/{name}]`,
+/api/tailscale/config`, `GET`/`POST`/`PUT`/`DELETE /api/tailscale/forwards[/{name}]`,
 same for `/publish`, `GET /api/tailscale/status`, `POST /api/tailscale/login/
 {start,cancel}`, plus the original read-only `GET /api/tailscale/state`
 — `{backendState, authUrl}`, same shape the old status-polling script wrote —
@@ -296,7 +296,7 @@ diverge from).
 router's own frontend (`frontend/` — its own npm project, not a code-docker workspace
 member anymore, see below) owns the actual page components (Dev Proxy,
 App Routes, Tailscale, DNS, Net 관리, tinyauth). Since a 2026-08-08 decoupling pass (see
-`CLAUDE.md` and `.claude/archive/router-frontend-decouple-plan-done.md`), code-docker's
+`.claude/net-auth-expansion-plan.md`), code-docker's
 webmanager no longer imports any of these components directly — it `<iframe>`-embeds this
 container's own `/router/` page instead (`webmanager/frontend/src/components/RouterEmbed/RouterFrame.tsx`
 in the code-docker repo), and `webmanager/frontend/package.json` there carries zero
@@ -351,8 +351,8 @@ read it directly — but that doesn't close the same-origin-script vector. `ROUT
 second `server{}` block (env-only/restart-required, same trust tier as `ALLOWED_HOSTS`/
 `ALLOWED_EXPORT_HOSTS` — never made in-app-editable) that serves router-manager's SPA+API
 standalone on a dedicated hostname via nginx `server_name` matching, so its cookie is scoped
-to that origin alone. `frontend`'s `RouterAuthPanel`/`RouterTrustedHostsPanel`/
-`OriginWarningBanner` show the currently-configured value read-only and warn when accessed
+to that origin alone. `frontend`'s `RouterAuthPanel` (which shows the configured
+`trustedHosts` read-only) and `OriginWarningBanner` warn when accessed
 over localhost or over the shared path despite a dedicated domain being configured — see
 docs/router.md's "보안: 공유 origin과 전용 도메인" section.
 
