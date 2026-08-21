@@ -227,8 +227,10 @@ netgate 설정이 아무리 정상이어도 절대 성공할 수 없습니다. `
 router가 `code-docker-internal` 외에 다른 `internal: true` 네트워크에도 붙는 경우(예:
 `EXTRA_INCLUDE`로 연동한 sibling 프로젝트가 router를 자기 전용 네트워크에도 붙이는 경우
 - `.claude/archive/roblox-studio-vnc-isolation-plan-done.md` 참고) 그 네트워크도 똑같이
-`DOCKER-INTERNAL`에 막힙니다 - `code-docker-netfilter-fix`는 `CODE_DOCKER_INTERNAL_NETWORK`
-하나가 아니라 `CODE_DOCKER_EXTRA_INTERNAL_NETWORKS`(공백 구분 목록, `example-env` 참고)로
+`DOCKER-INTERNAL`에 막힙니다 - `code-docker-netfilter-fix`는 `NETFILTER_FIX_INTERNAL_NETWORK`
+하나가 아니라 `NETFILTER_FIX_EXTRA_INTERNAL_NETWORKS`(공백 구분 목록, `example-env` 참고;
+이름이 `CODE_DOCKER_`가 아니라 `NETFILTER_FIX_`인 이유는 이 스크립트가 이제
+qwreey/router-docker-client의 범용 도구라 특정 소비자 이름을 달지 않기 때문입니다)로
 추가 네트워크 이름을 몇 개든 받아 각각에 동일한 `DOCKER-USER` 예외를 겁니다 -
 `code-docker-internal` 자신의 기본 보호는 별도 변수라 항상 그대로 유지됩니다.
 
