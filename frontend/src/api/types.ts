@@ -45,6 +45,39 @@ export interface AppRouteInfo {
   structured?: AppRoute
 }
 
+// Mirrors router/backend/internal/vnc.Target — one registered VNC target.
+// target is the target's *web* VNC front end (websockify's HTTP+WebSocket
+// port, e.g. "vnc-only:6080"), never its raw RFB port: router's Caddy is
+// stock (HTTP/WS only) and can't carry raw RFB at all. name doubles as the
+// App Route name that actually carries it, hence the same RFC1123-label
+// constraint AppRoute.name has.
+export interface VncTarget {
+  name: string
+  label: string
+  target: string
+  backend: string
+  requireAuth: boolean
+}
+
+// Mirrors router/backend/internal/vnc.Info — a target plus live drift
+// detection against the App Route carrying it. routeMissing = the fragment
+// is gone entirely; routeDiverged = it exists but points somewhere else (or
+// was hand-edited past what App Routes can parse).
+export interface VncTargetInfo extends VncTarget {
+  viewerPath: string
+  routeMissing: boolean
+  routeDiverged: boolean
+}
+
+// Mirrors router/backend's GET /api/vnc/targets response. backends is the
+// server's own list of implemented viewer backends (internal/vnc.Backends)
+// rather than a frontend-side constant, so adding one there surfaces it in
+// the picker without a matching frontend change.
+export interface VncTargetsResponse {
+  targets: VncTargetInfo[]
+  backends: string[]
+}
+
 // Mirrors router/backend's GET /api/tailscale/state.
 export interface TailscaleState {
   backendState: string

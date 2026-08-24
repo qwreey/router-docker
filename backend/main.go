@@ -136,6 +136,14 @@ func main() {
 	mux.Handle("DELETE /api/app-routes/apps/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteAppRoute)))
 	mux.Handle("POST /api/app-routes/reload", gate.RequirePassword(http.HandlerFunc(handleReloadAppRoutes)))
 
+	// The VNC tab (internal/vnc) - a registry layered ON TOP of App Routes
+	// above, not a parallel proxy mechanism, so these routes deliberately
+	// sit next to them.
+	mux.HandleFunc("GET /api/vnc/targets", handleListVncTargets)
+	mux.Handle("POST /api/vnc/targets", gate.RequirePassword(http.HandlerFunc(handleCreateVncTarget)))
+	mux.Handle("PUT /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateVncTarget)))
+	mux.Handle("DELETE /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteVncTarget)))
+
 	mux.HandleFunc("GET /api/tinyauth/users", handleListTinyauthUsers)
 	mux.Handle("POST /api/tinyauth/users", gate.RequirePassword(http.HandlerFunc(handleAddTinyauthUser)))
 	mux.Handle("PUT /api/tinyauth/users/{name}/password", gate.RequirePassword(http.HandlerFunc(handleSetTinyauthUserPassword)))

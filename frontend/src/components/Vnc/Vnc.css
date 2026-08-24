@@ -1,0 +1,138 @@
+.vnc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.vnc-table th,
+.vnc-table td {
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.vnc-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.vnc-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.vnc-name-cell code {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.vnc-warn {
+  font-size: 0.75rem;
+  color: var(--danger, #d9534f);
+}
+
+/* The add button's own separator row - same spacing App Routes' and
+   Tailscale's inline add forms get from .form-grid-inline (not reused
+   directly: that class carries form-grid layout this single button has no
+   use for). Without it the button sits flush against the table above. */
+.vnc-add-row {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.vnc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.vnc-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vnc-checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.vnc-hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.vnc-hint-warn {
+  color: var(--danger, #d9534f);
+}
+
+.vnc-viewer {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.vnc-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.vnc-viewer-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vnc-viewer-title code {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.vnc-viewer-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* The icon-bearing buttons here are <a> as well as <button> (the 새 탭
+   link), so the flex alignment lives on the class rather than on a
+   button-only selector. */
+.vnc-viewer-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* A remote desktop has no useful "natural" height to grow to, so the frame
+   gets an explicit one: tall enough to be usable, capped by viewport height
+   so the whole page never turns into a scroll trap on a short window.
+   noVNC's own resize=scale (see internal/vnc's backendViewer) fits the
+   remote framebuffer to whatever this ends up being. */
+.vnc-viewer-frame {
+  width: 100%;
+  height: min(70vh, 720px);
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #000;
+  display: block;
+}
+
+/* Fullscreen is requested on the iframe element itself (see Vnc.tsx's
+   Viewer) - without this the element keeps its bordered/rounded box inside
+   the fullscreen viewport. */
+.vnc-viewer-frame:fullscreen {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}

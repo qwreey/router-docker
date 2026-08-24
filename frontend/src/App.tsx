@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DevProxy } from './components/DevProxy/DevProxy'
 import { AppRoutes } from './components/AppRoutes/AppRoutes'
+import { Vnc } from './components/Vnc/Vnc'
 import { Tailscale } from './components/Tailscale/Tailscale'
 import { Dns } from './components/Dns/Dns'
 import { NetManagement } from './components/NetManagement/NetManagement'
@@ -116,6 +117,7 @@ function App() {
       <EnvVersionBanner />
       {tab === 'dev-proxy' && <DevProxy />}
       {tab === 'app-routes' && <AppRoutes />}
+      {tab === 'vnc' && <Vnc />}
       {tab === 'tailscale' && <Tailscale />}
       {tab === 'dns' && <Dns />}
       {tab === 'net' && <NetManagement />}

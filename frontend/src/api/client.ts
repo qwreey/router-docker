@@ -161,6 +161,12 @@ export const { api: authApi } = createApiClient('router/api/auth', { skipUnlockR
 // pattern authApi uses for its own prefix.
 export const { api: appRoutesApi } = createApiClient('router/api/app-routes')
 
+// The VNC tab's target registry - same pattern as appRoutesApi. A separate
+// prefix rather than riding app-routes' own, even though every VNC target
+// is carried by an App Route underneath: the registry is its own resource
+// with its own conflict/drift semantics (see internal/vnc's doc comment).
+export const { api: vncApi } = createApiClient('router/api/vnc')
+
 // tinyauth user CRUD's own bound client - same pattern as appRoutesApi.
 export const { api: tinyauthApi } = createApiClient('router/api/tinyauth')
 

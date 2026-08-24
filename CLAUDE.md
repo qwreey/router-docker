@@ -60,12 +60,15 @@ management, this repo's own frontend, router-manager's own admin-API auth).
 ## Feature areas (detailed)
 
 User-facing docs: `docs/router.md`, `docs/egress-netgate.md`, `docs/dev-proxy.md`,
-`docs/tailscale.md` (now a short pointer into `docs/router.md`).
+`docs/app-routes.md`, `docs/vnc.md`, `docs/tailscale.md` (now a short pointer into
+`docs/router.md`).
 
-Four feature areas, each its own supervisord programs (`config/supervisord.d/*.conf`,
+Five feature areas. The first four each own supervisord programs (`config/supervisord.d/*.conf`,
 git-tracked built-in program definitions — see `config/netgate/supervisord.default.conf`'s
 own comment on the two `[include]` globs, one git-tracked for built-ins, one gitignored for
-user overrides, same auto-include idiom as the main image's `config/supervisord.default.conf`):
+user overrides, same auto-include idiom as the main image's `config/supervisord.default.conf`);
+the fifth (VNC) runs no process of its own at all — it's router-manager plus an App
+Routes fragment, see its own bullet below:
 
 - **netgate (egress lockdown)** — netinit-style routing enforcement (code-docker/dind side)
   plus router's own filtering (DNS-level content blocklist via dnsmasq, RFC1918/CIDR
@@ -194,6 +197,36 @@ user overrides, same auto-include idiom as the main image's `config/supervisord.
   `CADDY_ADAPTER_ENABLED`/`CADDY_ADAPTER_PORT` env, same names as before the move — also
   read by code-docker's nginx to build its `/exports/` proxy target). Moved here from
   code-docker in full, same reasoning as tailscale.
+- **VNC** (2026-08-25, `.claude/archive/router-vnc-tab-plan-done.md` in code-docker's
+  own repo) — a browser-embedded viewer for GUI containers attached to router
+  (`backend/internal/vnc`, `frontend/src/components/Vnc/`, `GET`/`POST`/`PUT`/`DELETE
+  /api/vnc/targets[/{name}]`, docs/vnc.md). Deliberately **not a new proxy mechanism**:
+  router's Caddy is stock (HTTP/WS only, no layer4 plugin), so raw RFB can never ride App
+  Routes/Dev Proxy — what gets proxied is the target's *web* VNC front end
+  (noVNC+websockify, typically `:6080`, running in front of an unchanged wayvnc on the
+  target's side), and App Routes is already the right carrier for that. So this package
+  owns only what App Routes has no concept of (a display Label, and which `Backend`'s
+  viewer URL shape to build) and drives an approutes fragment in lockstep with its own
+  registry (`/var/lib/code-docker-router/vnc/targets.json`) — one action registers both.
+  `List` re-reads approutes every call and reports drift (`RouteMissing`/`RouteDiverged`)
+  rather than caching what it wrote, so a fragment deleted or repointed from the App Routes
+  tab surfaces as a warning instead of a silently-404ing viewer; `Update` re-creates a
+  missing route rather than failing, the tab's own self-heal. `Backend` ships with exactly
+  one value (`novnc`) on purpose — the plan's decision was "noVNC와 Selkies를 나란히
+  (타겟별 선택 가능하게) 지원", so a second backend should be one more `backendViewer`
+  entry, not a schema change. Reaching a sibling project's container still needs that host
+  in `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS` (same `targetguard` allowlist App Routes uses —
+  no separate one). The viewer's iframe `src` is origin-sensitive and can't just use
+  `window.location.origin`: `/app/` is served only on the *shared* hostname's nginx block,
+  never on a dedicated `ROUTER_MANAGER_HOSTS` domain (that block deliberately serves
+  router-manager alone — putting user-registered app content on router-manager's own origin
+  is exactly what that feature exists to prevent), so webmanager's `RouterFrame.tsx` passes
+  its own origin in as `?origin=` and `frontend/src/components/Vnc/useViewerOrigin.ts`
+  falls back to refusing to render a viewer, with an explanation, when the SPA is opened
+  directly on a dedicated domain. Known limitation, verified live and inherited from the
+  target side rather than introduced here: wayvnc's `VNC_PASSWORD` makes it demand VeNCrypt
+  X509Plain, which current noVNC doesn't implement (`Unsupported security types (types:
+  262)`) — gate the web path with the App-Routes-shared tinyauth `requireAuth` instead.
 - **tinyauth** — router's own forward-auth, run as a plain supervisord program inside
   router itself (`config/tinyauth/tinyauth.default.sh`), not a separate compose
   service — `Dockerfile` multi-stage-extracts the prebuilt binary straight from

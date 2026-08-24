@@ -3,11 +3,12 @@
 // components/Layout/sections.ts) so App.tsx (splitPath/isTab) and
 // components/Layout/SidebarContainer.tsx (icon-per-tab mapping) can both
 // import it without a circular App.tsx<->SidebarContainer.tsx dependency.
-export type Tab = 'dev-proxy' | 'app-routes' | 'tailscale' | 'dns' | 'net' | 'tinyauth' | 'settings'
+export type Tab = 'dev-proxy' | 'app-routes' | 'vnc' | 'tailscale' | 'dns' | 'net' | 'tinyauth' | 'settings'
 
 export const TABS: { id: Tab; label: string }[] = [
   { id: 'dev-proxy', label: 'Dev Proxy' },
   { id: 'app-routes', label: 'App Routes' },
+  { id: 'vnc', label: 'VNC' },
   { id: 'tailscale', label: 'Tailscale' },
   { id: 'dns', label: 'DNS' },
   { id: 'net', label: 'Net 관리' },

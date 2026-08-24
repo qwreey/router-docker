@@ -3,6 +3,7 @@
 // consumer's import lines stay stable even if internal file layout changes.
 export { DevProxy } from './components/DevProxy/DevProxy'
 export { AppRoutes } from './components/AppRoutes/AppRoutes'
+export { Vnc } from './components/Vnc/Vnc'
 export { Tailscale } from './components/Tailscale/Tailscale'
 export { Dns } from './components/Dns/Dns'
 export { NetManagement } from './components/NetManagement/NetManagement'
