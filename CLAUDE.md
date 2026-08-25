@@ -72,25 +72,53 @@ Routes fragment, see its own bullet below:
 
 - **netgate (egress lockdown)** — netinit-style routing enforcement (code-docker/dind side)
   plus router's own filtering (DNS-level content blocklist via dnsmasq, RFC1918/CIDR
-  blocking, inbound port-forwarding). `code-docker-netinit` is a small sidecar built from its
-  own self-contained subtree (`netinit/` — own Dockerfile/build context, see
-  `netinit/CLAUDE.md`; same pattern as `router/` and `code-dind/`). It runs with
-  `network_mode: service:code-docker` (shares code-docker's
-  netns entirely — same interfaces/IP/routing table, not a separate IP) and
-  `cap_add: [NET_ADMIN]`, a capability code-docker itself never gets. `netinit/script/netinit-entrypoint.sh`
-  loops every 5s doing `ip route replace default via <router's resolved IP>`, defensively
-  (never exits non-zero, tolerates `router` not resolving) — this is what keeps code-docker's
-  default route pointed at router without code-docker ever being able to undo it.
-  `code-docker-dind` needs no separate sidecar for the same mechanism — it's already
-  `privileged: true`, so `code-dind/script/dind-entrypoint.sh` runs the identical loop itself
-  (backgrounded before its final `exec`, wrapped in `tini` so dockerd-as-PID-1 doesn't
-  accumulate zombies from the loop's repeated `ip`/`getent` forks). `script/entrypoint.sh`
-  gates everything network-sensitive (starting with `user-init.sh`'s qwreey-fish curl)
-  behind a bounded poll (60s timeout) for `ip route show default` to be non-empty — this is
-  what code-docker waits on for netinit to have planted a route, without a compose-level
-  `depends_on` cycle (route *reads* need no capability, only *writes* do). `router` is the
-  only container attached to both `code-docker-internal` and `code-docker-external`,
-  `cap_add: [NET_ADMIN]` only (no `privileged: true`).
+  blocking, inbound port-forwarding). code-docker no longer uses a per-target sidecar for
+  this at all: `code-docker-netinit` (the old `network_mode: service:code-docker` +
+  `cap_add: [NET_ADMIN]` sidecar) is gone (2026-08-25, see code-docker's own
+  `.claude/backlog/netinit-docker-plan.md`), replaced by `code-docker-netinit-docker`, a
+  single host-netns agent built from qwreey/router-docker-client's `netinit-docker/`
+  subdirectory (remote-git build context — `netinit-docker` absorbed the old
+  `netfilter-fix` tool's DOCKER-USER-exemption job too, see the DOCKER-INTERNAL section
+  below). It discovers opted-in targets by Docker label rather than by container
+  reference — networks carry `netinit.provider` plus an optional `netinit.gateway` (a
+  **container name only**; a raw IP is rejected, since accepting one would let a compose
+  line point a workload straight at an arbitrary LAN gateway) and optional
+  `netinit.exempt-forward: "true"`, workload containers carry only `netinit.provider` to
+  opt in, and matching is fail-closed (no label → untouched, an ambiguous match → error-
+  logged and skipped, nothing applied). For each match it `nsenter`s into the target's
+  netns — resolved via its *live* Docker `SandboxKey` under `/var/run/docker/netns`, never
+  a cached container handle — and applies the same `ip route replace default via <gateway>`
+  a sidecar used to apply from inside. Workload containers still get **zero**
+  `NET_ADMIN`/`SYS_ADMIN` — only the host-side agent itself holds the capability to set
+  routes, the same separation the old sidecar preserved. This structurally removes the
+  sidecar's old failure class: `network_mode: service:<target>` pinned the sidecar to the
+  target's *container ID* at create time, so a target *recreate* (not just an in-place
+  restart) orphaned it in the now-dead netns permanently, forever retried by
+  `restart: unless-stopped` against an ID that no longer existed — observed for real twice
+  on 2026-08-25 (roblox-studio-docker's own `studio-netinit`, then `code-docker-netinit`
+  itself while migrating this network onto the label scheme). `netinit-docker` holds no
+  container reference at all and re-resolves every `SandboxKey` each reconcile cycle, so a
+  target recreate is now a non-event — the next cycle just finds the new netns; force-
+  recreating a target and watching its route come back with no manual step is the
+  regression test for this. The generic `netinit` sidecar tool itself (still in
+  router-docker-client, see `netinit/CLAUDE.md`) is untouched by any of this and remains
+  for non-Docker-engine consumers — code-docker just no longer uses it.
+  `code-docker-dind` needs no separate agent for the same mechanism — it's already
+  `privileged: true`, so `code-dind/script/dind-entrypoint.sh` runs its own route loop from
+  inside itself (backgrounded before its final `exec`, wrapped in `tini` so
+  dockerd-as-PID-1 doesn't accumulate zombies from the loop's repeated `ip`/`getent`
+  forks); that loop was never container-ID pinned, so it never belonged to the failure
+  class above and didn't move. `script/entrypoint.sh` gates everything network-sensitive
+  (starting with `user-init.sh`'s qwreey-fish curl) behind a bounded poll (60s timeout) for
+  `ip route show default` to be non-empty — this is what code-docker waits on for
+  `netinit-docker` to have planted a route, without a compose-level `depends_on` cycle
+  (route *reads* need no capability, only *writes* do). This wait is a required part of the
+  design, not just a convenience: the host-side agent can only act **after** a target
+  container has started, so a workload that begins making outbound requests before its
+  route exists would otherwise get a window where it's routed nowhere in particular — see
+  the plan doc's "콜드스타트 레이스" section. `router` is the only container attached to
+  both `code-docker-internal` and `code-docker-external`, `cap_add: [NET_ADMIN]` only (no
+  `privileged: true`).
   - `[program:netgate-firewall]` (`config/netgate/firewall.default.sh`) loops every
     30s reading `config/netgate/config.default.yaml` (override pattern) via `yq -r`
     and translating it into iptables: an ordered `outbound:` allow/block CIDR list

@@ -98,10 +98,12 @@ services:
       - net.ipv4.ip_forward=1
     networks:
       code-docker-internal:
-        # code-docker-netinit's and dind-entrypoint.sh's own routing loops
-        # both resolve this alias by default - keep this alias in sync with
-        # ROUTER_HOSTNAME if you override it, see example-env. `forward` is
-        # tailscale-forward.default.sh's own socat bind target
+        # code-docker-netinit-docker (the host-side, label-driven routing agent - see
+        # .claude/backlog/netinit-docker-plan.md in the consuming project) resolves this
+        # alias by name off the `netinit.gateway` label on this network, and
+        # dind-entrypoint.sh's own routing loop resolves it the same way - keep this
+        # alias in sync with ROUTER_HOSTNAME if you override it, see example-env.
+        # `forward` is tailscale-forward.default.sh's own socat bind target
         # (`forward:<port>`, resolved from inside code-docker, reaches
         # router's forwards listeners).
         aliases:
