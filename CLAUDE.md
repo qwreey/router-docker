@@ -240,7 +240,12 @@ Routes fragment, see its own bullet below:
   width/height ≤ 0 as a *protocol error*, and libwayland makes that fatal, so wayvnc dies.
   Against a target that shuts itself down when its VNC server dies and a client that
   auto-reconnects, that's a restart loop (observed live against roblox-studio-docker,
-  which fixed its own side by patching a 1x1 floor into its vendored noVNC).
+  which fixed its own side by patching a 1x1 floor into its vendored noVNC). The viewer's 전체화면 button
+  **delegates to noVNC's own fullscreen button** when the iframe is same-origin, rather
+  than fullscreening the iframe from outside: the outside path never sets
+  `document.fullscreenElement` *inside* the frame, so noVNC's own button stayed stale and
+  took two presses to escape. The cross-origin fallback fullscreens the whole viewer card
+  (not the bare iframe) so the header's own exit button stays on screen.
 - **tinyauth** — router's own forward-auth, run as a plain supervisord program inside
   router itself (`config/tinyauth/tinyauth.default.sh`), not a separate compose
   service — `Dockerfile` multi-stage-extracts the prebuilt binary straight from

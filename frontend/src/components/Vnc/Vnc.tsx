@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, ExternalLink } from 'lucide-react'
+import { Maximize2, Minimize2, ExternalLink } from 'lucide-react'
 import { vncApi as api, errorMessage } from '../../api/client'
 import type { VncTarget, VncTargetInfo, VncTargetsResponse } from '../../api/types'
 import { ErrorBanner } from '../common/ErrorBanner'
@@ -23,31 +23,102 @@ const RESIZE_LABEL: Record<string, string> = {
   off: '안 함',
 }
 
+// The viewer iframe's own document, or null when it can't be reached:
+// cross-origin (the webmanager embed against a dedicated
+// ROUTER_MANAGER_HOSTS domain - see useViewerOrigin) or simply not loaded
+// yet.
+function novncDocument(frame: HTMLIFrameElement | null): Document | null {
+  if (!frame) return null
+  try {
+    return frame.contentDocument
+  } catch {
+    return null
+  }
+}
+
+// Is anything of ours fullscreen right now? Which document owns it depends
+// on which path handleFullscreen took, so both are checked.
+function isFullscreenActive(frame: HTMLIFrameElement | null): boolean {
+  return Boolean(document.fullscreenElement || novncDocument(frame)?.fullscreenElement)
+}
+
 // The live embed. Deliberately keyed on the full src by the caller, so
 // switching targets remounts rather than reusing a connected session's
 // iframe (noVNC reconnects to whatever it was told at load time; mutating
 // src in place leaves its internal state half-torn-down).
 function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string; onClose: () => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+  const [frameLoaded, setFrameLoaded] = useState(false)
   const src = origin + info.viewerPath
 
-  // Fullscreen is requested on the iframe element itself rather than
-  // handed to noVNC's own in-page fullscreen button: that button only sees
-  // the innermost document, so in the webmanager embed (webmanager ->
-  // router -> viewer, two nested cross-origin iframes) it can only fill its
-  // own frame. Requesting it here escapes to the real viewport - provided
-  // every ancestor iframe carries allow="fullscreen", which is why
-  // RouterFrame.tsx on the webmanager side sets it too.
-  function handleFullscreen() {
-    frameRef.current?.requestFullscreen?.().catch(() => {
+  // Keep this button's own label honest regardless of who toggled
+  // fullscreen - it can just as well be noVNC's control bar, or Esc. The
+  // inner document is the one that owns it on the delegated path below, so
+  // it's listened to as well; that listener can only be attached once the
+  // frame has loaded, hence the frameLoaded dependency.
+  useEffect(() => {
+    const sync = () => setFullscreen(isFullscreenActive(frameRef.current))
+    const inner = novncDocument(frameRef.current)
+    document.addEventListener('fullscreenchange', sync)
+    inner?.addEventListener('fullscreenchange', sync)
+    sync()
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      inner?.removeEventListener('fullscreenchange', sync)
+    }
+  }, [frameLoaded])
+
+  // Fullscreen the whole viewer card rather than the bare iframe: our own
+  // header (and with it the button that gets back out) then stays on
+  // screen. This is the fallback - see handleFullscreen.
+  function requestOwnFullscreen() {
+    cardRef.current?.requestFullscreen?.().catch(() => {
       // Denied by policy (a missing allow= on some ancestor, most likely) -
       // the 새 탭 button below is the working fallback, so there's nothing
       // useful to say beyond not crashing.
     })
   }
 
+  // Delegate to noVNC's own fullscreen button whenever it can be reached,
+  // instead of fullscreening from out here. Both fill the screen, but only
+  // the delegated one leaves noVNC's own UI consistent: fullscreening an
+  // <iframe> element from the parent never sets document.fullscreenElement
+  // *inside* that frame, so noVNC's fullscreenchange handler never fires,
+  // its control-bar button stays un-selected, and pressing it then enters a
+  // second fullscreen instead of leaving - which is why getting back out
+  // used to take opening "＞" and pressing that button twice. With a single
+  // owner (noVNC's own document) one press of either control toggles it.
+  function handleFullscreen() {
+    const frame = frameRef.current
+    if (!frame) return
+
+    const button = novncDocument(frame)?.getElementById('noVNC_fullscreen_button')
+    if (button) {
+      const leaving = isFullscreenActive(frame)
+      button.click()
+      // noVNC swallows a refused request, so an entry that didn't take is
+      // detected by looking rather than by catching. On the way in only:
+      // on the way out "nothing is fullscreen" is the success case, and
+      // re-entering there would be exactly wrong.
+      if (!leaving) {
+        window.setTimeout(() => {
+          if (!isFullscreenActive(frameRef.current)) requestOwnFullscreen()
+        }, 300)
+      }
+      return
+    }
+
+    if (isFullscreenActive(frame)) {
+      document.exitFullscreen?.()
+      return
+    }
+    requestOwnFullscreen()
+  }
+
   return (
-    <div className="card vnc-viewer">
+    <div className="card vnc-viewer" ref={cardRef}>
       <div className="vnc-viewer-header">
         <div className="vnc-viewer-title">
           <strong>{info.label || info.name}</strong>
@@ -55,7 +126,15 @@ function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string
         </div>
         <div className="vnc-viewer-actions">
           <button type="button" className="btn btn-small" onClick={handleFullscreen}>
-            <Maximize2 size={14} aria-hidden="true" /> 전체화면
+            {fullscreen ? (
+              <>
+                <Minimize2 size={14} aria-hidden="true" /> 전체화면 해제
+              </>
+            ) : (
+              <>
+                <Maximize2 size={14} aria-hidden="true" /> 전체화면
+              </>
+            )}
           </button>
           <a className="btn btn-small" href={src} target="_blank" rel="noreferrer">
             <ExternalLink size={14} aria-hidden="true" /> 새 탭
@@ -71,6 +150,7 @@ function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string
         className="vnc-viewer-frame"
         title={`VNC: ${info.label || info.name}`}
         allow="fullscreen; clipboard-read; clipboard-write"
+        onLoad={() => setFrameLoaded(true)}
       />
     </div>
   )

@@ -128,11 +128,29 @@
   display: block;
 }
 
-/* Fullscreen is requested on the iframe element itself (see Vnc.tsx's
-   Viewer) - without this the element keeps its bordered/rounded box inside
-   the fullscreen viewport. */
+/* On the delegated fullscreen path (see Vnc.tsx's Viewer) the element that
+   goes fullscreen lives inside this iframe, which makes the iframe itself a
+   fullscreen ancestor and match :fullscreen - without this it would keep its
+   bordered/rounded box inside the fullscreen viewport. */
 .vnc-viewer-frame:fullscreen {
   height: 100%;
   border: none;
   border-radius: 0;
+}
+
+/* The fallback path fullscreens the whole card instead, so the header - and
+   with it the button that exits again - stays reachable. The card is a plain
+   flex column otherwise, so it has to be told to fill the viewport and hand
+   the leftover height to the frame. */
+.vnc-viewer:fullscreen {
+  height: 100%;
+  margin-top: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.vnc-viewer:fullscreen .vnc-viewer-frame {
+  flex: 1;
+  height: auto;
+  max-height: none;
 }
