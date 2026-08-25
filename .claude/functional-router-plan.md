@@ -257,7 +257,7 @@ router → webmanager (webmanager가 router의 페이지 컴포넌트를 그대�
 
 ## 참고
 
-- `.claude/backlog/egress-netgate-plan.md` (레포 루트) — 이 문서의 전제가 되는 netgate
+- `.claude/archive/egress-netgate-plan-done.md` (레포 루트) — 이 문서의 전제가 되는 netgate
   설계/1단계 구현 완료 기록.
 - 레포 루트 CLAUDE.md의 tailscale 절 — "의도적으로 분리된 단일 책임 supervisord 프로그램"
   패턴의 기존 선례, router 안에서도 반복할 모델.

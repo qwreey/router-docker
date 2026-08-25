@@ -3,7 +3,7 @@
 code-docker 안에서 실행되는 AI 코딩 에이전트(Claude Code 등)가 프롬프트 인젝션이나
 버그로 인해 컨테이너 바깥(인터넷, 특히 같은 네트워크 위 공유기/NAS 같은 사설망 장비)에
 임의로 접근하지 못하게 막는 기능입니다. 전체 설계와 검토했다가 기각한 대안들은
-[`.claude/backlog/egress-netgate-plan.md`](../.claude/backlog/egress-netgate-plan.md)에
+[`.claude/archive/egress-netgate-plan-done.md`](../.claude/archive/egress-netgate-plan-done.md)에
 정리되어 있습니다. 이 기능은 지금 **router** 컨테이너 안 한 기능 영역으로 통합되어
 있습니다(`code-docker-router` 서비스, 예전 이름은 `code-docker-netgate`) — router의
 다른 역할(tailscale, Dev Proxy 등)은 [router.md](router.md)를 확인하세요. 이 문서
@@ -175,7 +175,7 @@ code-docker의 네트워크 네임스페이스를 공유했으므로 - 즉 code-
 때문). 이 클래스의 장애가 2026-08-25 하루에만 실제로 두 번 관찰됐습니다(한 번은
 roblox-studio-docker의 `studio-netinit`, 한 번은 이 네트워크에 라벨을 적용하려고
 재생성하는 과정에서 `code-docker-netinit` 자신) - 자세한 경위는 code-docker 저장소의
-`.claude/backlog/netinit-docker-plan.md`(그 저장소에 있음, 여기 아님)의 "발단" 절 참고.
+`.claude/archive/netinit-docker-plan-done.md`(그 저장소에 있음, 여기 아님)의 "발단" 절 참고.
 
 **지금은 이 문제 자체가 구조적으로 없어졌습니다.** `code-docker-netinit` 사이드카는
 제거됐고, 그 역할은 `code-docker-netinit-docker`(호스트 netns에서 도는 라벨 기반 에이전트,
@@ -288,7 +288,7 @@ networks:
 `NETFILTER_FIX_INTERNAL_NETWORK`/`NETFILTER_FIX_EXTRA_INTERNAL_NETWORKS`는 **deprecated**로
 남아 최소 한 주기는 계속 동작하고(쓰이면 경고 로그를 남깁니다), `code-docker-internal`
 자신의 기본 보호는 그 네트워크 자신의 `netinit.exempt-forward` 라벨로 항상 그대로
-유지됩니다 - 자세한 내용은 code-docker의 `example-env`와 `.claude/backlog/netinit-docker-plan.md`
+유지됩니다 - 자세한 내용은 code-docker의 `example-env`와 `.claude/archive/netinit-docker-plan-done.md`
 참고.
 
 ## 당장 인터넷이 필요하다면 (기능 자체를 끄기)

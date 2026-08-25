@@ -17,7 +17,7 @@ superseded).
 The network-boundary container for
 [code-docker](https://github.com/qwreey/code-docker) — see
 `.claude/functional-router-plan.md` for the full vision and every design
-decision. code-docker's own `.claude/backlog/egress-netgate-plan.md` (in
+decision. code-docker's own `.claude/archive/egress-netgate-plan-done.md` (in
 that repo, not here) covers the egress/DNAT design this container started
 from (it was `code-docker-netgate`, living inside code-docker itself,
 before being promoted first to a subtree and then to this standalone repo).
@@ -75,7 +75,7 @@ Routes fragment, see its own bullet below:
   blocking, inbound port-forwarding). code-docker no longer uses a per-target sidecar for
   this at all: `code-docker-netinit` (the old `network_mode: service:code-docker` +
   `cap_add: [NET_ADMIN]` sidecar) is gone (2026-08-25, see code-docker's own
-  `.claude/backlog/netinit-docker-plan.md`), replaced by `code-docker-netinit-docker`, a
+  `.claude/archive/netinit-docker-plan-done.md`), replaced by `code-docker-netinit-docker`, a
   single host-netns agent built from qwreey/router-docker-client's `netinit-docker/`
   subdirectory (remote-git build context — `netinit-docker` absorbed the old
   `netfilter-fix` tool's DOCKER-USER-exemption job too, see the DOCKER-INTERNAL section
@@ -142,7 +142,7 @@ Routes fragment, see its own bullet below:
     (`127.0.0.11`) refuses to forward queries externally, so both eventually point at router
     instead (see `.claude/router-dns-plan.md`) — code-docker itself does this
     indirectly now, through its own local `dns-local` resolver (`config/dns-local/`, see
-    `.claude/backlog/dns-local-servfail-fix.md`) rather than router directly in
+    `.claude/archive/dns-local-servfail-fix-done.md`) rather than router directly in
     `/etc/resolv.conf`; `code-docker-dind` still points its own `/etc/resolv.conf` at router
     the plain way. dnsmasq forwards upstream using router's own (working, non-internal) `/etc/resolv.conf`
     by default, or a fixed custom upstream list (e.g. `1.1.1.1`) if configured — see

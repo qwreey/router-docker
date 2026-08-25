@@ -3,7 +3,7 @@
 code-docker의 네트워크 경계를 전담하는 컨테이너. **이 문서는 지금 상태와 남은 할 일의
 색인만** 담는다 — 전체 비전/설계 결정은 `.claude/functional-router-plan.md`
 (왜 router가 필요한지, 무엇이 이관되는지, 이 서브트리로 이동됨)와 레포 루트
-`.claude/backlog/egress-netgate-plan.md`(현재 이관된 egress/DNAT 기능의 원래 설계 —
+`.claude/archive/egress-netgate-plan-done.md`(현재 이관된 egress/DNAT 기능의 원래 설계 —
 code-docker/dind 쪽 netinit 루프도 다루는 문서라 레포 루트에 남음)에 있음.
 `webmanager/plan.md`와 같은 패턴 — 기능별 자세한 문서는 `router/.claude/`에 쌓임
 (`functional-router-plan.md`, `router-dns-plan.md`, `archive/tailscale-design.md`).
@@ -109,7 +109,7 @@ router 안의 한 기능 영역(egress/DNAT) 이름으로 유지 — 컨테이�
   target 검증 + router-manager 인증 강제 설계(진행 중, 보안 감사 발견 사항이 계기)
 - `.claude/archive/tailscale-design.md` — code-docker 안에서 tailscale을 돌리던 시절의
   원래 설계(이 컨테이너의 tailscale 기능으로 완전히 대체됨, 역사 기록용)
-- `.claude/backlog/egress-netgate-plan.md` (레포 루트) — netgate 기능의 원 설계, code-docker/dind
+- `.claude/archive/egress-netgate-plan-done.md` (레포 루트) — netgate 기능의 원 설계, code-docker/dind
   쪽 netinit 루프도 다루는 문서라 레포 루트에 남음
 - `docs/egress-netgate.md` (레포 루트) — 사용자 대상 문서
 - code-docker 쪽 `.claude/archive/router-vnc-tab-plan-done.md` — VNC 탭의 아이디어→
