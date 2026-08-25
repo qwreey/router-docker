@@ -8,10 +8,23 @@ import (
 )
 
 func TestViewerPathNoVNC(t *testing.T) {
+	// No ResizeMode set is the shape of every target stored before the
+	// field existed - it must come out as the default, not as an empty
+	// resize= that noVNC would reject.
 	got := viewerPath(Target{Name: "studio-vnc", Backend: BackendNoVNC})
-	want := "/app/studio-vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1"
+	want := "/app/studio-vnc/vnc.html?autoconnect=1&reconnect=1&resize=remote"
 	if got != want {
 		t.Fatalf("viewerPath() = %q, want %q", got, want)
+	}
+}
+
+func TestViewerPathResizeMode(t *testing.T) {
+	for _, mode := range []string{ResizeRemote, ResizeScale, ResizeOff} {
+		got := viewerPath(Target{Name: "studio-vnc", Backend: BackendNoVNC, ResizeMode: mode})
+		want := "/app/studio-vnc/vnc.html?autoconnect=1&reconnect=1&resize=" + mode
+		if got != want {
+			t.Fatalf("viewerPath(%q) = %q, want %q", mode, got, want)
+		}
 	}
 }
 
@@ -35,6 +48,29 @@ func TestValidateRejectsSelfTarget(t *testing.T) {
 	err := validate(Target{Name: "loop", Target: "router:6080", Backend: BackendNoVNC})
 	if err == nil || !strings.Contains(err.Error(), "point back at router") {
 		t.Fatalf("validate() = %v, want a self-target rejection", err)
+	}
+}
+
+func TestValidateResizeMode(t *testing.T) {
+	// code-docker rather than the vnc-only alias the other cases use:
+	// this test needs validate to reach the resize check and *pass*, and
+	// targetguard's default allowlist would reject an unrecognized host
+	// first (see approutes.ValidateTarget).
+	base := Target{Name: "studio-vnc", Target: "code-docker:6080", Backend: BackendNoVNC}
+
+	for _, mode := range []string{"", ResizeRemote, ResizeScale, ResizeOff} {
+		target := base
+		target.ResizeMode = mode
+		if err := validate(target); err != nil {
+			t.Fatalf("validate(resizeMode=%q) = %v, want nil", mode, err)
+		}
+	}
+
+	target := base
+	target.ResizeMode = "fit"
+	err := validate(target)
+	if err == nil || !strings.Contains(err.Error(), "unknown resize mode") {
+		t.Fatalf("validate() = %v, want an unknown-resize-mode error", err)
 	}
 }
 

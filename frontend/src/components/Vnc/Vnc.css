@@ -115,9 +115,9 @@
 
 /* A remote desktop has no useful "natural" height to grow to, so the frame
    gets an explicit one: tall enough to be usable, capped by viewport height
-   so the whole page never turns into a scroll trap on a short window.
-   noVNC's own resize=scale (see internal/vnc's backendViewer) fits the
-   remote framebuffer to whatever this ends up being. */
+   so the whole page never turns into a scroll trap on a short window. What
+   the target does with that size is per-target now (Target.ResizeMode - ask
+   the remote desktop to actually become this size, or just scale into it). */
 .vnc-viewer-frame {
   width: 100%;
   height: min(70vh, 720px);

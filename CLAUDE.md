@@ -227,6 +227,20 @@ Routes fragment, see its own bullet below:
   target side rather than introduced here: wayvnc's `VNC_PASSWORD` makes it demand VeNCrypt
   X509Plain, which current noVNC doesn't implement (`Unsupported security types (types:
   262)`) — gate the web path with the App-Routes-shared tinyauth `requireAuth` instead.
+  `Target.ResizeMode` (2026-08-25, `remote`/`scale`/`off`, default `remote`, `""` on
+  targets stored before it existed = the default) is the one target field that changes the
+  viewer URL rather than the App Route: `remote` asks the target's own server to resize its
+  desktop to the browser window (RFB `SetDesktopSize` — wayvnc has this on by default and
+  its headless output follows live, verified against a real target), which is why it isn't
+  forced viewer-wide — a server without that support just refuses, and noVNC then neither
+  resizes nor scales, so those targets need `scale`. Sharper reason for per-target, found
+  the hard way while shipping this: noVNC has **no lower bound** on the size it requests,
+  so a viewer laid out at 0x0 (`display:none` iframe, no layout pass) asks for a 0x0
+  desktop — wayvnc forwards that as a wlr-output-management custom mode, wlroots rejects
+  width/height ≤ 0 as a *protocol error*, and libwayland makes that fatal, so wayvnc dies.
+  Against a target that shuts itself down when its VNC server dies and a client that
+  auto-reconnects, that's a restart loop (observed live against roblox-studio-docker,
+  which fixed its own side by patching a 1x1 floor into its vendored noVNC).
 - **tinyauth** — router's own forward-auth, run as a plain supervisord program inside
   router itself (`config/tinyauth/tinyauth.default.sh`), not a separate compose
   service — `Dockerfile` multi-stage-extracts the prebuilt binary straight from

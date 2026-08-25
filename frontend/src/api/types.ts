@@ -51,12 +51,19 @@ export interface AppRouteInfo {
 // stock (HTTP/WS only) and can't carry raw RFB at all. name doubles as the
 // App Route name that actually carries it, hence the same RFC1123-label
 // constraint AppRoute.name has.
+// Mirrors router/backend/internal/vnc.Target's own resize constants, which
+// are noVNC's `resize` setting spelled verbatim. '' is what a target stored
+// before the field existed carries and means "the backend's default"
+// (remote) - see that file's own comment for why it isn't normalized away.
+export type VncResizeMode = 'remote' | 'scale' | 'off' | ''
+
 export interface VncTarget {
   name: string
   label: string
   target: string
   backend: string
   requireAuth: boolean
+  resizeMode: VncResizeMode
 }
 
 // Mirrors router/backend/internal/vnc.Info — a target plus live drift

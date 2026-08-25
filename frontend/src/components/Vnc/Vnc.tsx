@@ -14,6 +14,15 @@ const BACKEND_LABEL: Record<string, string> = {
   novnc: 'noVNC',
 }
 
+// '' is a target stored before resizeMode existed; the backend resolves it
+// to remote, so the list says the same thing the viewer will actually do.
+const RESIZE_LABEL: Record<string, string> = {
+  '': '원격 해상도',
+  remote: '원격 해상도',
+  scale: '맞춰 축소',
+  off: '안 함',
+}
+
 // The live embed. Deliberately keyed on the full src by the caller, so
 // switching targets remounts rather than reusing a connected session's
 // iframe (noVNC reconnects to whatever it was told at load time; mutating
@@ -183,6 +192,7 @@ export function Vnc() {
                   <th>이름</th>
                   <th>대상</th>
                   <th>백엔드</th>
+                  <th>창 크기</th>
                   <th>인증</th>
                   <th aria-label="동작" className="table-actions-col" />
                 </tr>
@@ -206,6 +216,7 @@ export function Vnc() {
                       <code>{info.target}</code>
                     </td>
                     <td>{BACKEND_LABEL[info.backend] ?? info.backend}</td>
+                    <td>{RESIZE_LABEL[info.resizeMode] ?? info.resizeMode}</td>
                     <td>{info.requireAuth ? '요구' : '없음'}</td>
                     <td className="table-actions-col">
                       <button

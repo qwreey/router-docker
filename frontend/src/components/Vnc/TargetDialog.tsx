@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Sheet } from '../common/Sheet'
 import { ErrorBanner } from '../common/ErrorBanner'
-import type { VncTarget } from '../../api/types'
+import type { VncResizeMode, VncTarget } from '../../api/types'
 
 // Same bind-address nudge Dev Proxy's RouteDialog and the App Routes tab
 // both carry: router's Caddy reaches targets over code-docker-internal, so
@@ -28,6 +28,23 @@ const BACKEND_LABEL: Record<string, string> = {
   novnc: 'noVNC',
 }
 
+// Unlike backends (server-supplied, see the picker below), the resize modes
+// are a closed set - a mode only exists if a viewer's own query parameter
+// accepts it - so they're spelled out here with real labels instead of
+// being rendered from a list of bare identifiers.
+const RESIZE_MODES: { value: Exclude<VncResizeMode, ''>; label: string }[] = [
+  { value: 'remote', label: '원격 해상도 변경 (권장)' },
+  { value: 'scale', label: '화면에 맞춰 축소' },
+  { value: 'off', label: '아무것도 안 함' },
+]
+
+const RESIZE_HINT: Record<Exclude<VncResizeMode, ''>, string> = {
+  remote:
+    '창 크기가 바뀌면 대상의 실제 해상도를 그만큼 바꿔달라고 요청합니다(RFB SetDesktopSize) — 네이티브 클라이언트에서 창을 늘렸을 때와 같은 동작입니다. wayvnc는 이걸 기본으로 지원하지만, 지원하지 않는 서버(고정 크기 Xvfb 앞의 x11vnc 등)에서는 요청이 거부되고 스케일링도 하지 않아 스크롤바가 생깁니다 — 그 경우 아래 "화면에 맞춰 축소"를 쓰세요.',
+  scale: '대상의 해상도는 그대로 두고, 받은 화면을 뷰어 크기에 맞춰 축소해서 보여줍니다.',
+  off: '해상도도 안 바꾸고 축소도 하지 않습니다. 뷰어보다 크면 스크롤바가 생깁니다.',
+}
+
 export function TargetDialog({
   target: existing,
   backends,
@@ -48,10 +65,15 @@ export function TargetDialog({
   const [target, setTarget] = useState(existing?.target ?? '')
   const [backend, setBackend] = useState(existing?.backend ?? backends[0] ?? 'novnc')
   const [requireAuth, setRequireAuth] = useState(existing?.requireAuth ?? false)
+  // '' (a target predating this field) resolves to the backend's default
+  // rather than being offered as a fourth, blank option.
+  const [resizeMode, setResizeMode] = useState<Exclude<VncResizeMode, ''>>(
+    existing?.resizeMode || 'remote',
+  )
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    onSave({ name: name.trim(), label: label.trim(), target: target.trim(), backend, requireAuth })
+    onSave({ name: name.trim(), label: label.trim(), target: target.trim(), backend, requireAuth, resizeMode })
   }
 
   return (
@@ -115,6 +137,21 @@ export function TargetDialog({
             ))}
           </select>
           <p className="vnc-hint">대상 컨테이너가 실제로 돌리고 있는 웹 VNC 스택을 고르세요.</p>
+        </div>
+        <div className="form-field">
+          <label htmlFor="vnc-resize">창 크기 변경 처리</label>
+          <select
+            id="vnc-resize"
+            value={resizeMode}
+            onChange={(e) => setResizeMode(e.target.value as Exclude<VncResizeMode, ''>)}
+          >
+            {RESIZE_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <p className="vnc-hint">{RESIZE_HINT[resizeMode]}</p>
         </div>
         <label className="vnc-checkbox-option">
           <input type="checkbox" checked={requireAuth} onChange={(e) => setRequireAuth(e.target.checked)} />

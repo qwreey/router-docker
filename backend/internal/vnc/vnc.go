@@ -76,11 +76,12 @@ const BackendNoVNC = "novnc"
 // is one more line here.
 //
 // The query string is deliberately part of this value rather than assembled
-// per-request: it's a property of the viewer implementation, not of the
-// target. autoconnect makes the embed connect without a click (the whole
-// point of a dashboard tab), resize=scale fits the remote framebuffer to
-// whatever size the iframe happens to be, and reconnect survives a target
-// container restart without the user re-opening the tab. Notably absent:
+// per-request: what's left in it is a property of the viewer
+// implementation, not of the target. autoconnect makes the embed connect
+// without a click (the whole point of a dashboard tab) and reconnect
+// survives a target container restart without the user re-opening the tab.
+// The one setting that turned out NOT to be viewer-wide is resize — see
+// Target.ResizeMode, which viewerPath appends to this. Notably absent:
 // noVNC's `path` setting — websockify accepts the WebSocket upgrade on any
 // path and noVNC resolves its default (`websockify`) relative to the page's
 // own location, which already lands inside /app/<name>/ and back through
@@ -88,7 +89,63 @@ const BackendNoVNC = "novnc"
 // plan's own e2e run ("WebSocket 업그레이드+RFB 배너 수신"), so pinning an
 // absolute path here would only break it.
 var backendViewer = map[string]string{
-	BackendNoVNC: "vnc.html?autoconnect=1&resize=scale&reconnect=1",
+	BackendNoVNC: "vnc.html?autoconnect=1&reconnect=1",
+}
+
+// Resize modes, spelled exactly as noVNC's own `resize` setting so
+// viewerPath can pass the value straight through instead of translating it.
+//
+//   - ResizeRemote asks the *server* to make its desktop the size of the
+//     browser window (the RFB SetDesktopSize extension — what TigerVNC does
+//     when you drag its window edge). wayvnc has this enabled by default
+//     (`-R/--disable-resizing` is the opt-out) and its headless output
+//     follows live, verified against a real target: connecting at a
+//     960x634 viewport moved HEADLESS-1 off 1920x1080 to match, and it
+//     tracked further window resizes.
+//   - ResizeScale keeps the remote desktop's own size and fits the received
+//     framebuffer into the iframe instead. This was the hardcoded behavior
+//     before ResizeMode existed.
+//   - ResizeOff does neither.
+//
+// The default is ResizeRemote, including for targets stored before this
+// field existed (empty string — see resizeMode). It is deliberately not
+// forced viewer-wide, because it isn't universally safe: a server with no
+// SetDesktopSize support (x11vnc in front of a fixed-size Xvfb, say) simply
+// refuses the request, and noVNC then neither resizes nor scales — the
+// framebuffer keeps its own size and the viewer grows scrollbars. Those
+// targets want ResizeScale, hence per-target.
+//
+// One more thing worth knowing before picking ResizeRemote for a heavy
+// target: noVNC requests the size in *device* pixels, so a HiDPI browser
+// asks for a proportionally larger desktop (a 1400px-wide window at DPR 1.2
+// requested 1680px, measured), which is that much more for the target to
+// render and encode.
+const (
+	ResizeRemote = "remote"
+	ResizeScale  = "scale"
+	ResizeOff    = "off"
+)
+
+// resizeModes is the validation set for the above. Unlike Backends it is
+// NOT shipped to the frontend: a mode only exists here if some viewer's own
+// query parameter accepts it, so it's a closed set the picker can spell out
+// with proper labels rather than a list the server can grow on its own.
+var resizeModes = map[string]struct{}{
+	ResizeRemote: {},
+	ResizeScale:  {},
+	ResizeOff:    {},
+}
+
+// resizeMode resolves t's mode, mapping "" (a target stored before the
+// field existed) onto the default. Empty is kept as a real state rather
+// than normalized away on save, so those targets follow the default if it
+// ever changes instead of being frozen at whatever it was when they were
+// last edited.
+func resizeMode(t Target) string {
+	if t.ResizeMode == "" {
+		return ResizeRemote
+	}
+	return t.ResizeMode
 }
 
 // Backends lists every implemented backend, for the tab's own picker.
@@ -106,12 +163,16 @@ func Backends() []string {
 // devproxy.ValidateName's RFC1123-label constraint; Label is display-only.
 // Target is the target's *web* VNC front end (websockify's port, e.g.
 // "vnc-only:6080"), never its raw RFB port — see the package doc comment.
+// ResizeMode is one of the resize constants above (or "" for the default) —
+// the only target field that changes the viewer URL rather than the App
+// Route, so it's the one thing here approutes never sees.
 type Target struct {
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Target      string `json:"target"`
 	Backend     string `json:"backend"`
 	RequireAuth bool   `json:"requireAuth"`
+	ResizeMode  string `json:"resizeMode"`
 }
 
 // Info is what List returns: the stored target plus live drift detection
@@ -140,6 +201,11 @@ func validate(t Target) error {
 	if _, ok := backendViewer[t.Backend]; !ok {
 		return fmt.Errorf("%w: unknown backend %q (known: %s)", ErrValidation, t.Backend, strings.Join(Backends(), ", "))
 	}
+	// "" is legal: it means "the default", which is what every target
+	// stored before this field existed carries.
+	if _, ok := resizeModes[t.ResizeMode]; !ok && t.ResizeMode != "" {
+		return fmt.Errorf("%w: unknown resize mode %q (known: %s, %s, %s)", ErrValidation, t.ResizeMode, ResizeRemote, ResizeScale, ResizeOff)
+	}
 	// Label is display-only (never reaches a Caddyfile), so it only needs
 	// to be sane to render — no control characters, bounded length.
 	if len(t.Label) > 200 {
@@ -159,7 +225,7 @@ func viewerPath(t Target) string {
 	if !ok {
 		return ""
 	}
-	return "/app/" + url.PathEscape(t.Name) + "/" + suffix
+	return "/app/" + url.PathEscape(t.Name) + "/" + suffix + "&resize=" + resizeMode(t)
 }
 
 func load() ([]Target, error) {
