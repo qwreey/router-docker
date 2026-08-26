@@ -294,7 +294,8 @@ networks:
 ## 당장 인터넷이 필요하다면 (기능 자체를 끄기)
 
 `NETGATE_ENABLED="false"`(`.env`)로 끄면 dind 자신의 라우팅 루프, code-docker 시작 시의
-라우트 대기 가드, `code-docker-router` 자신의 방화벽(CIDR 차단/인바운드 포트포워딩) 적용
+라우트 대기 가드(그 가드 자신의 스위치는 `NETINIT_WAIT`이고, 설정하지 않으면 기본값이
+`NETGATE_ENABLED`를 그대로 따라갑니다 - 아래 참고), `code-docker-router` 자신의 방화벽(CIDR 차단/인바운드 포트포워딩) 적용
 루프, 그리고 `code-docker-netinit-docker`의 라우트 심기가 전부 아무것도 안 하고 idle
 상태가 됩니다. 마지막 것은 code-docker의 `docker-compose.yml`이 이 값을 그 컨테이너
 자신의 `NETINIT_DOCKER_ENABLED`로 넘겨주기 때문입니다 - netinit-docker는
@@ -306,6 +307,21 @@ router-docker-client의 범용 도구라 env 이름이 자기 자신을 가리�
 네트워크에 대한 Docker 자신의 하드닝을 되돌리는 것이지, egress 경계를 세우는 게
 아닙니다). `code-docker-dind`는 이 라벨을 달고 있지 않으므로 애초에 해당 없음 -
 privileged라 처음부터 자기 루프로 직접 관리합니다.
+
+### `NETINIT_WAIT` - 라우트 대기 가드만 따로 끄기
+
+code-docker의 entrypoint가 "바깥에서 누가 내 기본 라우트를 심어줄 때까지 기다리는"
+게이트는 `NETINIT_WAIT`(+ `NETINIT_WAIT_TIMEOUT`, 기본 60초)로 따로 제어됩니다.
+`code-docker-netinit-docker`는 컨테이너가 이미 뜬 뒤에야 netns에 들어갈 수 있으므로,
+그 사이 워크로드가 라우트 없이 도는 창을 막기 위한 것이고, 타임아웃되면 non-zero로
+종료해 `restart: unless-stopped`가 재시도하게 합니다(fail-closed).
+
+이름이 `NETGATE_*`가 아닌 이유는 이 동작의 주인이 범용 도구인 netinit-docker이기
+때문입니다 - `roblox-studio-docker`처럼 netgate를 모르는 다른 클라이언트도 같은 이름
+쌍을 씁니다. `NETGATE_ENABLED`는 "이 배포가 router를 거쳐 나가는가"라는 code-docker
+자신의 스위치로 남고, `NETINIT_WAIT`의 기본값이 그걸 따라가므로 **둘을 각각 설정할
+필요는 없습니다**. 대기만 끄고 netgate는 켜두고 싶은(라우트를 다른 방법으로 심는)
+특수한 경우에만 `NETINIT_WAIT="false"`를 씁니다.
 
 `NETGATE_ENABLED="false"`는 그 나머지(dind/router 쪽 루프)에 대해서는
 `TAILSCALE_ENABLED`와 같은 패턴으로, router 컨테이너 자체나 DNS 포워딩/tailscale/
