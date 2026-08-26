@@ -91,7 +91,14 @@ func Validate(target string, allowedHosts map[string]bool, allowExternalEnv, fea
 			names = append(names, h)
 		}
 		sort.Strings(names)
-		return fmt.Errorf("target host %q is not a known code-docker-internal service (allowed: %s) - set %s=true to allow other targets", host, strings.Join(names, ", "), allowExternalEnv)
+		// Both opt-outs are named, safe one first: the old text mentioned only
+		// allowExternalEnv, which drops the allowlist entirely and is meant as a
+		// debug escape hatch (see ExtraAllowedHostsEnv's own doc comment), and
+		// described the allowlist as "known code-docker-internal service" - which
+		// reads as if membership were scoped to a network/interface rather than
+		// being the plain hostname lookup it actually is. Both misled the person
+		// who wrote them.
+		return fmt.Errorf("target host %q is not in the allowed target host list (allowed: %s) - add it to %s (infra config, recommended), or set %s=true to drop the allowlist entirely (debug only)", host, strings.Join(names, ", "), ExtraAllowedHostsEnv, allowExternalEnv)
 	}
 	return nil
 }
