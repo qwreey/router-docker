@@ -250,8 +250,16 @@ Routes fragment, see its own bullet below:
   router-manager alone — putting user-registered app content on router-manager's own origin
   is exactly what that feature exists to prevent), so webmanager's `RouterFrame.tsx` passes
   its own origin in as `?origin=` and `frontend/src/components/Vnc/useViewerOrigin.ts`
-  falls back to refusing to render a viewer, with an explanation, when the SPA is opened
-  directly on a dedicated domain. Known limitation, verified live and inherited from the
+  falls back to `ROUTER_APP_ORIGIN` (2026-08-27, surfaced through `GET /api/auth/status`'s
+  own `appOrigin` field, validated as a plain http(s) origin on both sides before it ever
+  reaches an iframe `src`) when the SPA is opened directly on a dedicated domain — and only
+  refuses to render a viewer, with an explanation naming that variable, when it's unset too.
+  Serving `/app/` on the dedicated domain instead was the obvious-looking alternative and is
+  precisely wrong: the app would then be same-origin *with* router-manager and could
+  `fetch('/router/api/...')` with the ambient unlock cookie, which is the exact gap the
+  dedicated domain exists to close (the shared-origin cookie strip in nginx doesn't help
+  either — it only stops the *backend* from reading the header, never same-origin script).
+  Known limitation, verified live and inherited from the
   target side rather than introduced here: wayvnc's `VNC_PASSWORD` makes it demand VeNCrypt
   X509Plain, which current noVNC doesn't implement (`Unsupported security types (types:
   262)`) — gate the web path with the App-Routes-shared tinyauth `requireAuth` instead.
@@ -282,10 +290,52 @@ Routes fragment, see its own bullet below:
   but the finished binary itself needs no such step and copies over cleanly). Sleeps
   instead of starting when `TINYAUTH_APPURL` is unset (tinyauth refuses to boot without a
   real URL) — same opt-out idiom as `CADDY_ADAPTER_ENABLED`/`TAILSCALE_ENABLED`, and what
-  keeps an unconfigured instance from crash-looping. Protects individual Dev Proxy routes
-  that opt into "require auth" (Caddy `forward_auth` → tinyauth's `/api/auth/caddy` on
-  `127.0.0.1:3000`) — a separate, lighter tool from webmanager's own `internal/authgate`,
-  which stays exactly as-is, scoped only to webmanager's own Terminal/File Manager/Logs.
+  keeps an unconfigured instance from crash-looping. Protects individual Dev Proxy routes,
+  App Routes and VNC targets that opt into "require auth" (Caddy `forward_auth` → tinyauth's
+  `/api/auth/caddy` on `127.0.0.1:3000`) — a separate, lighter tool from webmanager's own
+  `internal/authgate`, which stays exactly as-is, scoped only to webmanager's own
+  Terminal/File Manager/Logs.
+  **That forward_auth block is not the two-liner tinyauth's own Caddy docs start from, and
+  every extra line in it is load-bearing** — see `backend/internal/devproxy/forwardauth.go`,
+  which owns the single copy both `internal/devproxy` and `internal/approutes` render (at
+  different indents) and parse back. Until 2026-08-27 it *was* that two-liner, and "인증
+  요구" consequently never worked for anyone, for two independent reasons found live:
+  Caddy sets neither `X-Forwarded-Proto` nor `X-Forwarded-Host` on a request it took over a
+  **unix-socket listener** (which is every listener router actually serves through — nginx →
+  `/run/caddy-adapter.sock` and `/run/caddy-app.sock`), not even passing through ones the
+  incoming request already carried, and tinyauth answers **400 Bad Request** rather than 401
+  when either is missing; and tinyauth signals "not logged in" with 401 +
+  `X-Tinyauth-Location` rather than a 302, which `forward_auth` copies through verbatim
+  unless a `handle_response` turns it into a `redir`. `X-Forwarded-Uri` also has to be
+  `{http.request.orig_uri}`, since App Routes' `handle_path` has already stripped
+  `/app/<name>` by then and tinyauth builds its post-login `redirect_uri` from that header.
+  `X-Forwarded-Proto` is deliberately the *incoming* header rather than `{scheme}` (router
+  always terminates plain HTTP, so `{scheme}` would send the browser back to an `http://`
+  URL that an https-embedded viewer can't follow at all) — router's own nginx guarantees
+  it's set, defaulting it to its own `$scheme`, via the `$router_forwarded_proto` map.
+  Because fragments are otherwise only rewritten when a user happens to edit that entry,
+  `devproxy.Normalize`/`approutes.Normalize` (called from `main.go`'s
+  `normalizeCaddyFragments` at startup, then one Caddy reload) re-render any managed
+  fragment that no longer matches the current template — that's what repairs an existing
+  deployment's already-registered auth-required entries. Raw-editor fragments (the ones
+  `parseStructured` refuses) are never touched.
+  **tinyauth's own login UI needs a hostname of its own**: `TINYAUTH_HOSTS`
+  (`example-env.router`, comma-separated, default empty) builds a dedicated nginx
+  `server{}` block serving it at that host's root, same shape as
+  `NGINX_ROUTER_MANAGER_SERVER_BLOCK`. It can't be a path — tinyauth's SPA references its
+  assets and its own API by root-absolute path and has no base-path setting (a path in
+  `TINYAUTH_APPURL` is accepted and ignored, v5.1.3). Before that block existed nothing in
+  router routed to port 3000 at all, so the login page was literally unreachable; the
+  service now logs a warning when `TINYAUTH_APPURL` is set without it. `TINYAUTH_HOSTS` is
+  the *only* value a normal deployment sets — `tinyauth.default.sh` derives
+  `TINYAUTH_APPURL` from its first host as `https://<host>` when it's unset, since the two
+  are the same hostname typed twice and a hand-maintained mismatch fails silently (the
+  browser just lands somewhere that doesn't serve tinyauth). https is assumed because
+  router always terminates plain HTTP behind someone else's TLS; setting `TINYAUTH_APPURL`
+  explicitly still wins. `ootb-config.sh` therefore asks one question, not two. Session sharing
+  across the protected hostnames is tinyauth's own doing, not this block's — it scopes its
+  cookie to the parent domain (`auth.subdomainsenabled`, on by default), verified:
+  logging in at `auth.example.com` sets `Domain=example.com`.
   `TINYAUTH_AUTH_USERS` (docker-compose env) is empty by default — no one can log in until
   set (`docker run --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --username <u>
   --password <p> --docker` generates the value). The recommended path is now per-user

@@ -353,8 +353,11 @@ export function Vnc() {
             <span>
               이 페이지는 <code>ROUTER_MANAGER_HOSTS</code> 전용 도메인에서 열려 있습니다. 그 도메인은 보안상
               router-manager 자신만 서비스하고 <code>/app/</code>은 서비스하지 않으므로(사용자가 등록한 앱을
-              router-manager와 같은 origin에 두지 않기 위한 의도적인 설계) 여기서는 뷰어를 띄울 수 없습니다.
-              webmanager의 VNC 탭에서 열거나, 공유 호스트네임의 <code>/router/</code> 경로로 접속하세요.
+              router-manager와 같은 origin에 두지 않기 위한 의도적인 설계) 뷰어를 띄우려면 공유 호스트네임의
+              origin을 알려줘야 합니다 — <code>.env.router</code>에{' '}
+              <code>ROUTER_APP_ORIGIN=https://&lt;공유 호스트네임&gt;</code>을 설정하고 router를 재시작하면 이
+              탭에서도 바로 볼 수 있습니다. 그때까지는 webmanager의 VNC 탭에서 열거나, 공유 호스트네임의{' '}
+              <code>/router/</code> 경로로 접속하세요.
             </span>
           </div>
         </div>

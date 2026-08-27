@@ -60,7 +60,10 @@ router가 이 기능을 갖는 게 자연스러운 이유는 이미 code-docker�
 - **창 크기 변경 처리** — 아래 "창 크기 변경 처리" 참고.
 - **인증 요구 (tinyauth)** — App Routes의 같은 옵션과 완전히 동일합니다
   ([인증](app-routes.md#인증) 참고). 최소 한 명의 tinyauth 사용자가 등록되어
-  있어야 실제로 로그인할 수 있습니다.
+  있어야 실제로 로그인할 수 있고, tinyauth 로그인 화면을 서비스할
+  `TINYAUTH_HOSTS`도 설정되어 있어야 합니다 — 비어 있으면 "인증 요구"를 켠
+  대상은 전부 접속 불가가 됩니다. 자세한 내용은
+  [router.md#tinyauth](router.md#tinyauth) 참고.
 
 ### 대상 호스트 allowlist
 
@@ -167,6 +170,15 @@ redis-insight류의 단순 GUI 툴은 noVNC로 충분하지만, 카메라 회전
   열립니다.
 - **공유 호스트네임의 `/router/`** — `/app/`이 같은 origin에 있으므로 그대로
   동작합니다.
+
+전용 도메인을 **직접** 열었을 때도 뷰어를 띄우고 싶다면 `ROUTER_APP_ORIGIN`
+(`example-env.router`)에 `/app/`을 실제로 서비스하는 공유 호스트네임을
+`https://code.example.com`처럼 적어두세요 — SPA가 뷰어 iframe을 그 origin에서
+불러옵니다(iframe만 cross-origin이 되며, 그 분리 자체가 전용 도메인이 존재하는
+이유이므로 문제가 아닙니다). `ROUTER_MANAGER_HOSTS`를 안 쓰면
+`ROUTER_APP_ORIGIN`도 설정할 필요가 없습니다 — 자세한 내용은
+[router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인routermanagerhosts)
+참고.
 
 ## App Route가 어긋났을 때
 

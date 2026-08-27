@@ -125,7 +125,7 @@ func Render(a App) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "handle_path /app/%s/* {\n", a.Name)
 	if a.RequireAuth {
-		fmt.Fprintf(&b, "\tforward_auth %s {\n\t\turi %s\n\t}\n", devproxy.TinyauthTarget, devproxy.TinyauthVerifyURI)
+		b.WriteString(devproxy.RenderForwardAuth("\t"))
 	}
 	fmt.Fprintf(&b, "\treverse_proxy %s {\n", a.Target)
 	fmt.Fprintf(&b, "\t\theader_down Location %q %q\n", locationRewriteSearch, locationRewriteReplace(a.Name))
@@ -150,14 +150,12 @@ func parseStructured(name, content string) (App, bool) {
 	body := lines[1 : len(lines)-1]
 	a := App{Name: name}
 	i := 0
-	wantForwardAuth := fmt.Sprintf("\tforward_auth %s {", devproxy.TinyauthTarget)
-	if i < len(body) && body[i] == wantForwardAuth {
-		wantURI := "\t\turi " + devproxy.TinyauthVerifyURI
-		if i+2 >= len(body) || body[i+1] != wantURI || body[i+2] != "\t}" {
-			return App{}, false
-		}
+	if next, ok := devproxy.MatchForwardAuth(body, i, "\t"); ok {
 		a.RequireAuth = true
-		i += 3
+		i = next
+	} else if i < len(body) && strings.HasPrefix(body[i], "\tforward_auth ") {
+		// See devproxy.parseRoute's identical guard.
+		return App{}, false
 	}
 	if i >= len(body) || !strings.HasPrefix(body[i], "\treverse_proxy ") || !strings.HasSuffix(body[i], " {") {
 		return App{}, false

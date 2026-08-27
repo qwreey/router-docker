@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -78,6 +80,35 @@ type authStatusResponse struct {
 	// lets the frontend compare "am I currently on one of TrustedHosts" and
 	// warn if not (see the localhost/shared-origin banner).
 	RequestHost string `json:"requestHost"`
+	// AppOrigin mirrors ROUTER_APP_ORIGIN - the origin router's own nginx
+	// serves /app/ on, i.e. the *shared* hostname. Only meaningful when
+	// TrustedHosts is non-empty: a dedicated ROUTER_MANAGER_HOSTS domain
+	// deliberately serves router-manager and nothing else (that's the
+	// whole point - no user-registered app content on router-manager's own
+	// origin), so the VNC tab opened on that domain has no origin of its
+	// own to load a viewer from and needs to be told the shared one. Empty
+	// when unset, which is also the only correct value when there is no
+	// dedicated domain at all - the SPA's own origin already serves /app/
+	// then. Read-only here, same reasoning as TrustedHosts.
+	AppOrigin string `json:"appOrigin"`
+}
+
+// appOrigin normalizes ROUTER_APP_ORIGIN down to a bare scheme://host[:port]
+// and drops anything that isn't a plain http(s) origin, so the frontend
+// never has to defend against a `javascript:`/`data:` value reaching an
+// iframe src (it re-checks anyway - see useViewerOrigin.ts - but a value
+// this side already refused can't get that far).
+func appOrigin() string {
+	raw := strings.TrimSpace(os.Getenv("ROUTER_APP_ORIGIN"))
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		log.Printf("auth: ignoring ROUTER_APP_ORIGIN=%q - expected a plain origin like https://code.example.com", raw)
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // trustedHosts parses ROUTER_MANAGER_HOSTS the same way
@@ -110,6 +141,7 @@ func handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		Source:       gate.Source(),
 		TrustedHosts: trustedHosts(),
 		RequestHost:  r.Host,
+		AppOrigin:    appOrigin(),
 	}
 	if until, ok := gate.UnlockedUntil(r); ok {
 		resp.Unlocked = true

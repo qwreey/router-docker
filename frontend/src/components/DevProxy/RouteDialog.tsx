@@ -102,6 +102,13 @@ export function RouteDialog({
           <input type="checkbox" checked={requireAuth} onChange={(e) => setRequireAuth(e.target.checked)} />
           인증 요구 (tinyauth 로그인)
         </label>
+        {requireAuth && (
+          <p className="dev-proxy-route-hint">
+            tinyauth에 사용자가 최소 한 명 등록되어 있어야 하고, 로그인 화면을 서비스할{' '}
+            <code>TINYAUTH_HOSTS</code>가 <code>.env.router</code>에 설정되어 있어야
+            합니다. 둘 중 하나라도 빠지면 이 라우트는 로그인 페이지에 도달할 방법이 없어 그대로 접속이 막힙니다.
+          </p>
+        )}
 
         {error && <ErrorBanner message={error} />}
         <div className="dev-proxy-edit-toggle">

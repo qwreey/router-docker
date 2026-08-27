@@ -378,7 +378,8 @@ export function DevProxy() {
             바깥 리버스 프록시가 원하는 요청의 path 앞에 <code>/exports</code>를 붙이고(Host는 그대로 두고) 이
             컨테이너(router)의 80번 포트로 그대로 넘기면 됩니다 — 안에서는 각 expose의 host 값과 실제 Host 헤더가
             일치하는지로 분배합니다. 인증(라우트별 "인증 요구")을 쓰려면{' '}
-            <code>TINYAUTH_APPURL</code>/<code>TINYAUTH_AUTH_USERS</code>도 설정해야 합니다.
+            <code>TINYAUTH_HOSTS</code>(로그인 화면을 서비스할 전용 호스트네임)와{' '}
+            <code>TINYAUTH_AUTH_USERS</code>도 설정해야 합니다.
           </span>
         </div>
         <div className="info-note">

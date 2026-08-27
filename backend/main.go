@@ -10,15 +10,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/qwreey/envmigrate"
 
+	"router/internal/approutes"
 	"router/internal/authgate"
+	"router/internal/devproxy"
 	"router/internal/netgate"
 	"router/internal/tailscale"
 )
@@ -179,6 +183,8 @@ func main() {
 	// RouterAuthPanel inside the SPA itself.
 	mux.Handle("GET /", staticHandler(staticDir))
 
+	go normalizeCaddyFragments()
+
 	listener, err := listen()
 	if err != nil {
 		log.Fatal(err)
@@ -186,6 +192,51 @@ func main() {
 	log.Printf("router-manager listening on %s (auth gate configured: %v, source: %s)", listener.Addr(), gate.Configured(), gate.Source())
 	if err := http.Serve(listener, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// normalizeCaddyFragments re-renders any managed Dev Proxy / App Routes
+// fragment whose text has drifted from what the current template produces,
+// then asks the running Caddy to pick the result up. See
+// devproxy.Normalize's own doc comment for why this is a startup repair
+// step and not just cosmetics - the tinyauth forward_auth block written by
+// routers older than 2026-08-27 never worked at all, and fragments are
+// otherwise only rewritten when a user happens to edit that entry.
+//
+// Runs in its own goroutine: the disk rewrite is the part that actually
+// matters (caddy-adapter reads these fragments itself on its own start),
+// and the reload is a best-effort nicety for the already-running case.
+// caddy-adapter and router-manager are independent supervisord programs
+// with no ordering guarantee, so a reload right at startup can legitimately
+// find no Caddy to talk to yet - hence the retries, and a log line rather
+// than a fatal when they run out.
+func normalizeCaddyFragments() {
+	exposes, err := devproxy.Normalize()
+	if err != nil {
+		log.Printf("normalize: dev-proxy fragments: %v", err)
+	}
+	apps, err := approutes.Normalize()
+	if err != nil {
+		log.Printf("normalize: app-route fragments: %v", err)
+	}
+	if len(exposes) == 0 && len(apps) == 0 {
+		return
+	}
+	log.Printf("normalize: re-rendered stale caddy fragments (dev-proxy: %v, app-routes: %v)", exposes, apps)
+
+	for attempt := 1; attempt <= 5; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := devproxy.Reload(ctx)
+		cancel()
+		if err == nil {
+			log.Printf("normalize: caddy reloaded")
+			return
+		}
+		if attempt == 5 {
+			log.Printf("normalize: couldn't reload caddy after re-rendering (%v) - the fragments on disk are correct, so a caddy-adapter restart picks them up", err)
+			return
+		}
+		time.Sleep(time.Duration(attempt) * 2 * time.Second)
 	}
 }
 

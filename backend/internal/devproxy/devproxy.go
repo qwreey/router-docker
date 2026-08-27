@@ -221,7 +221,7 @@ func renderRoute(b *strings.Builder, rt Route) {
 		fmt.Fprintf(b, "\t%s {\n", directive)
 	}
 	if rt.RequireAuth {
-		fmt.Fprintf(b, "\t\tforward_auth %s {\n\t\t\turi %s\n\t\t}\n", TinyauthTarget, TinyauthVerifyURI)
+		b.WriteString(RenderForwardAuth("\t\t"))
 	}
 	if rt.StripPrefix != "" {
 		fmt.Fprintf(b, "\t\turi strip_prefix %s\n", rt.StripPrefix)
@@ -288,14 +288,15 @@ func parseRoute(body []string, i int) (Route, int, bool) {
 	}
 	rt := Route{Mode: m[1], Path: m[2]}
 	i++
-	wantForwardAuth := fmt.Sprintf("\t\tforward_auth %s {", TinyauthTarget)
-	if i < len(body) && body[i] == wantForwardAuth {
-		wantURI := "\t\t\turi " + TinyauthVerifyURI
-		if i+2 >= len(body) || body[i+1] != wantURI || body[i+2] != "\t\t}" {
-			return Route{}, i, false
-		}
+	if next, ok := MatchForwardAuth(body, i, "\t\t"); ok {
 		rt.RequireAuth = true
-		i += 3
+		i = next
+	} else if i < len(body) && strings.HasPrefix(body[i], "\t\tforward_auth ") {
+		// A forward_auth that isn't one of the shapes ForwardAuthBlock
+		// knows about (hand-edited, or written by a router newer than
+		// this one) - refuse the structured parse rather than silently
+		// dropping it on the next Render.
+		return Route{}, i, false
 	}
 	if i < len(body) && strings.HasPrefix(body[i], "\t\turi strip_prefix ") {
 		rt.StripPrefix = strings.TrimPrefix(body[i], "\t\turi strip_prefix ")

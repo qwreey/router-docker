@@ -175,7 +175,10 @@ server {
 적용됩니다 — Dev Proxy의 라우트별 인증과 동일한 메커니즘(Caddy의
 `forward_auth`를 tinyauth에 연결)입니다. 사용하려면 tinyauth에 최소 한
 명의 사용자가 등록되어 있어야 합니다 — [router.md#tinyauth](router.md#tinyauth)의
-`TINYAUTH_AUTH_USERS` 생성 방법을 확인하세요.
+`TINYAUTH_AUTH_USERS` 생성 방법을 확인하세요. 그리고 tinyauth 자신의 로그인
+화면을 서비스할 `TINYAUTH_HOSTS`가 설정되어 있어야 합니다 — 비어 있으면
+로그인 화면에 도달할 방법 자체가 없어서 "인증 요구"를 켠 앱은 전부 접속
+불가가 됩니다. 자세한 내용은 [router.md#tinyauth](router.md#tinyauth) 참고.
 
 인증이 없는 상태로 두려면 그냥 "인증 요구"를 끄면 됩니다 — 그 경우 바깥
 리버스 프록시 쪽에서 별도로 auth를 걸지 않는 한 완전히 공개됩니다.

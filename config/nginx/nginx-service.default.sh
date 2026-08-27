@@ -174,7 +174,55 @@ else
     export NGINX_ROUTER_MANAGER_SERVER_BLOCK=""
 fi
 
+# TINYAUTH_HOSTS (router/example-env.router, comma-separated, default
+# empty) - dedicated hostname(s) serving tinyauth's own login UI. See
+# router/config/nginx/nginx.default.conf's own comment on this placeholder
+# for why tinyauth needs a whole hostname rather than a path, and
+# router/docs/router.md#tinyauth for the setup.
+#
+# Warned about rather than silently ignored when TINYAUTH_APPURL is set
+# without this: that combination is exactly the state router shipped in
+# before this block existed, and its symptom (every "인증 요구" target
+# answering 400/redirecting into code-server instead of a login page) gives
+# no hint at all about what's missing.
+if [ -n "${TINYAUTH_HOSTS:-}" ]; then
+    IFS=',' read -ra tinyauth_hosts <<< "$TINYAUTH_HOSTS"
+    tinyauth_server_names=""
+    for host in "${tinyauth_hosts[@]}"; do
+        host="$(echo "$host" | xargs)"
+        [ -n "$host" ] && tinyauth_server_names="$tinyauth_server_names $host"
+    done
+else
+    tinyauth_server_names=""
+fi
+
+if [ -n "$tinyauth_server_names" ]; then
+    export NGINX_TINYAUTH_SERVER_BLOCK="server {
+        listen 80;
+        server_name$tinyauth_server_names;
+
+        if (\$code_docker_loopback_blocked) {
+            return 403 \"blocked: reached via tailscale's automatic loopback forwarding, not the published port - see NGINX_BLOCK_LOOPBACK in example-env\n\";
+        }
+
+        # tinyauth's own SPA + API at this domain's root. It has no base-path
+        # setting, so root is the only place it can be served from.
+        location / {
+            proxy_pass http://127.0.0.1:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Forwarded-Proto \$router_forwarded_proto;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        }
+    }"
+else
+    export NGINX_TINYAUTH_SERVER_BLOCK=""
+    if [ -n "${TINYAUTH_APPURL:-}" ]; then
+        echo "nginx-service: TINYAUTH_APPURL is set but TINYAUTH_HOSTS is not - nothing serves tinyauth's login page, so every 'require auth' Dev Proxy route / App Route / VNC target will fail to log in. See router/docs/router.md#tinyauth" >&2
+    fi
+fi
+
 generated_config=/run/nginx.generated.conf
-envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK}' < "$nginx_config" > "$generated_config"
+envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK}' < "$nginx_config" > "$generated_config"
 
 exec nginx -g "daemon off;" -c "$generated_config"

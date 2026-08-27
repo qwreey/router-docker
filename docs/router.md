@@ -148,9 +148,38 @@ router 자신의 supervisord 프로그램으로 돕니다 — `Dockerfile`이 �
 `ghcr.io/tinyauthapp/tinyauth`에서 이미 빌드된 바이너리만 멀티스테이지로 추출해
 씁니다(소스 빌드는 안 함 — pnpm 프론트엔드 빌드가 필수라 이 레포의 다른 Go 바이너리
 빌드 패턴과 안 맞지만, 바이너리 자체를 그대로 복사해오는 데는 문제가 없습니다).
-`TINYAUTH_APPURL`이 비어 있으면(tinyauth 자신이 실제 URL 없이는 부팅을 거부하므로)
-그냥 대기 상태로 유지되고 크래시 루프를 돌지 않습니다. `TINYAUTH_APPURL`은 실제
-도메인 형식(`https://code-docker.example.com`)으로 `.env`에 설정해야 합니다.
+`TINYAUTH_HOSTS`/`TINYAUTH_APPURL` 둘 다 비어 있으면(tinyauth 자신이 실제 URL
+없이는 부팅을 거부하므로) 그냥 대기 상태로 유지되고 크래시 루프를 돌지
+않습니다.
+
+**tinyauth에서 설정할 값은 사실상 `TINYAUTH_HOSTS` 하나입니다** — 로그인 화면을
+서비스할 전용 호스트네임입니다. tinyauth의 SPA는 자기 자산(`/assets/...`)과 API(`/api/user/login`)를 전부 루트
+절대경로로 참조하고 base path 설정이 없어서, `TINYAUTH_APPURL`에 경로를 붙이는
+방식으로는 동작하지 않습니다(붙여도 무시됩니다 — tinyauth v5.1.3 기준 확인).
+로그인 화면 전용 호스트네임을 하나 통째로 내줘야 하고, `TINYAUTH_HOSTS`(콤마로
+여러 개 가능, `.env.router`)를 설정하면 router의 nginx가 그 호스트네임에 대해
+tinyauth 로그인 UI를 루트에서 직접 서비스하는 `server{}` 블록을 만듭니다.
+**비워두면(기본값) 로그인 화면에 도달할 방법 자체가 없어서 "인증 요구"를 켠
+Dev Proxy/App Routes/VNC 대상은 전부 접속 불가가 됩니다** — "인증 요구"를 켠
+대상이 안 열린다면 가장 먼저 의심할 곳입니다. `TINYAUTH_APPURL`은 설정되어
+있는데 `TINYAUTH_HOSTS`가 비어 있으면 router의 nginx가 시작 시 경고를 남깁니다.
+이 호스트네임도 DNS 레코드와 바깥 리버스 프록시 등록이 필요합니다 — router가
+서비스하는 다른 hostname들과 동일합니다.
+
+`TINYAUTH_APPURL`은 비워두면 `TINYAUTH_HOSTS`의 첫 호스트로
+`https://<host>`를 자동으로 만들어 씁니다 — 실제 배포에서 둘은 같은
+호스트라 두 번 적을 이유가 없고, 손으로 맞추다 어긋나면 조용히 엉뚱한
+곳으로 리다이렉트되기 때문입니다. router 자신은 항상 평문 HTTP를 종단하고
+TLS는 바깥 리버스 프록시가 맡으므로 스킴은 https로 가정합니다 — 평문
+http로 쓰거나 외부 URL이 내부 `server_name`과 다르면 그때만 직접
+설정하세요.
+
+tinyauth는 세션 쿠키를 부모 도메인에 걸어줍니다(`auth.subdomainsenabled` 기본
+on — 실측: `auth.example.com`에서 로그인하면 `Domain=example.com`으로 쿠키가
+설정되어 `code.example.com/app/...`도 함께 커버됩니다). `TINYAUTH_HOSTS`는
+보호하려는 대상들과 같은 부모 도메인 아래의 호스트네임으로 고르면 로그인
+한 번으로 전부 커버됩니다. https 뒤에 있다면 `TINYAUTH_AUTH_SECURECOOKIE=true`도
+함께 켜는 걸 권장합니다(기본 false).
 
 사용자는 기본적으로 아무도 없는 상태로 시작합니다 — `/router/`(router-manager UI,
 "tinyauth" 탭 — webmanager에도 같은 탭이 있습니다)에서 사용자를 추가/삭제/비밀번호
@@ -302,6 +331,21 @@ router-manager에 직접 연결합니다(SPA + API 전부) — 그 도메인에�
 로그인을 한 번만 하고 싶다면 —
 [security-login.md의 "여러 서브도메인 한 번에 로그인
 (SSO)"](security-login.md#여러-서브도메인-한-번에-로그인-sso--router_manager_hosts-등)
+참고.
+
+전용 도메인은 일부러 router-manager 자신만 서비스하고 `/app/`은 서비스하지
+않습니다 — 사용자가 등록한(신뢰할 수 없는) 앱 콘텐츠를 router-manager와 같은
+origin에 두지 않는 것 자체가 이 격리의 목적입니다. 그 결과 전용 도메인을
+**직접** 열어 VNC 탭에 들어가면 뷰어가 불러올 origin을 알 수 없어 뷰어를 아예
+띄우지 못합니다 — `ROUTER_APP_ORIGIN`(`example-env.router`)에 `/app/`을 실제로
+서비스하는 공유 호스트네임을 `https://code.example.com`처럼 적어두면 전용
+도메인에서도 VNC 뷰어가 동작합니다(뷰어 iframe만 cross-origin이 되고, 그
+분리야말로 전용 도메인이 존재하는 이유이니 문제가 아닙니다). `ROUTER_MANAGER_HOSTS`를
+안 쓰면 `ROUTER_APP_ORIGIN`도 설정할 필요가 없습니다(그때는 SPA가 열려 있는
+origin이 곧 `/app/`을 서비스합니다) — webmanager에 내장된 VNC 탭은 자신의
+origin을 `?origin=`으로 직접 넘겨주므로 이 값 없이도 이미 정상 동작합니다.
+자세한 증상은
+[vnc.md의 관련 절](vnc.md#전용-관리-도메인routermanagerhosts에서는-뷰어가-열리지-않습니다)
 참고.
 
 **webmanager에 내장된 Dev Proxy/App Routes/Tailscale/DNS/Net 관리/tinyauth 탭은 항상

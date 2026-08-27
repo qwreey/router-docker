@@ -157,6 +157,13 @@ export function TargetDialog({
           <input type="checkbox" checked={requireAuth} onChange={(e) => setRequireAuth(e.target.checked)} />
           인증 요구 (tinyauth)
         </label>
+        {requireAuth && (
+          <p className="vnc-hint">
+            tinyauth에 사용자가 최소 한 명 등록되어 있어야 하고(설정 &gt; tinyauth 탭), 로그인 화면을 서비스할{' '}
+            <code>TINYAUTH_HOSTS</code>가 <code>.env.router</code>에 설정되어 있어야
+            합니다. 둘 중 하나라도 빠지면 이 대상은 로그인 페이지에 도달할 방법이 없어 그대로 접속이 막힙니다.
+          </p>
+        )}
         {error && <ErrorBanner message={error} />}
         <div className="vnc-form-actions">
           <button type="submit" className="btn btn-primary" disabled={submitting}>

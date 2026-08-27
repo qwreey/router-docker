@@ -186,6 +186,13 @@ function TargetPanel({ info, onSaved }: { info: AppRouteInfo; onSaved: (newName?
         />
         인증 요구 (tinyauth)
       </label>
+      {requireAuth && (
+        <p className="app-routes-hint">
+          tinyauth에 사용자가 최소 한 명 등록되어 있어야 하고, 로그인 화면을 서비스할{' '}
+          <code>TINYAUTH_HOSTS</code>가 <code>.env.router</code>에 설정되어 있어야
+          합니다. 둘 중 하나라도 빠지면 이 앱은 로그인 페이지에 도달할 방법이 없어 그대로 접속이 막힙니다.
+        </p>
+      )}
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       <div className="app-routes-edit-toggle">
         <button type="button" className="btn btn-primary btn-small" disabled={submitting} onClick={handleSave}>

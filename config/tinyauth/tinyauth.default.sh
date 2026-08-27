@@ -11,11 +11,33 @@ set -e
 # but the prebuilt binary itself needs no such step and drops in here just
 # fine.
 #
+# TINYAUTH_APPURL is the URL tinyauth builds its login-page redirects from;
+# TINYAUTH_HOSTS is the hostname router's own nginx actually serves that
+# login page on (config/nginx/nginx-service.default.sh). In every real
+# deployment those are the same hostname typed twice, so derive one from
+# the other rather than making the user keep two values in sync by hand -
+# a mismatch between them fails *silently*, sending the browser to a host
+# that serves something other than tinyauth.
+#
+# https because router itself always terminates plain HTTP behind someone
+# else's TLS-terminating reverse proxy, so the scheme the browser uses is
+# effectively always https; set TINYAUTH_APPURL explicitly to override
+# (a plain-http deployment, or an external URL that differs from the
+# internal server_name).
+if [ -z "${TINYAUTH_APPURL:-}" ] && [ -n "${TINYAUTH_HOSTS:-}" ]; then
+    tinyauth_first_host="$(echo "$TINYAUTH_HOSTS" | cut -d',' -f1 | xargs)"
+    if [ -n "$tinyauth_first_host" ]; then
+        TINYAUTH_APPURL="https://$tinyauth_first_host"
+        export TINYAUTH_APPURL
+        echo "tinyauth: TINYAUTH_APPURL not set - derived $TINYAUTH_APPURL from TINYAUTH_HOSTS"
+    fi
+fi
+
 # tinyauth itself refuses to start (exits immediately) without
 # TINYAUTH_APPURL set to a real URL - sleep instead of crash-looping when
 # it's unset, same opt-out idiom as CADDY_ADAPTER_ENABLED/TAILSCALE_ENABLED.
 if [ -z "${TINYAUTH_APPURL:-}" ]; then
-    echo "tinyauth: TINYAUTH_APPURL not set - see example-env's TINYAUTH_APPURL comment"
+    echo "tinyauth: neither TINYAUTH_HOSTS nor TINYAUTH_APPURL is set - see example-env.router's tinyauth section"
     exec sleep infinity
 fi
 

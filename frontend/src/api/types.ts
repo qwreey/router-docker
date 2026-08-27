@@ -246,4 +246,8 @@ export interface AuthStatus {
   unlockedUntil?: string | null // RFC3339, only set when unlocked
   trustedHosts: string[]
   requestHost: string
+  // ROUTER_APP_ORIGIN - the origin that actually serves /app/ (the shared
+  // hostname). Only set/needed when trustedHosts is non-empty; see
+  // components/Vnc/useViewerOrigin.ts.
+  appOrigin: string
 }
