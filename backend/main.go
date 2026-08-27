@@ -147,6 +147,11 @@ func main() {
 	mux.Handle("POST /api/vnc/targets", gate.RequirePassword(http.HandlerFunc(handleCreateVncTarget)))
 	mux.Handle("PUT /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateVncTarget)))
 	mux.Handle("DELETE /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteVncTarget)))
+	// The BackendRFB transport: router's own noVNC (served below) opens
+	// this, and it bridges to the target's raw RFB port. Gated like a write
+	// rather than like a read - it hands out an interactive desktop, which
+	// is the most powerful thing this API does.
+	mux.Handle("GET /api/vnc/targets/{name}/ws", gate.RequirePassword(http.HandlerFunc(handleVncSocket)))
 
 	mux.HandleFunc("GET /api/tinyauth/users", handleListTinyauthUsers)
 	mux.Handle("POST /api/tinyauth/users", gate.RequirePassword(http.HandlerFunc(handleAddTinyauthUser)))
@@ -181,6 +186,22 @@ func main() {
 	// Tailscale/설정 tabs) - replaces the old standalone password-only page
 	// (handlers_ui.go), whose setup/change functionality is now
 	// RouterAuthPanel inside the SPA itself.
+	// router's own copy of noVNC, the viewer for BackendRFB targets. Ahead
+	// of the SPA fallback above by virtue of being the longer pattern (Go
+	// 1.22 ServeMux precedence), so no ordering constraint between them.
+	//
+	// "/novnc/", not "/vnc/", and spelled with a {path...} wildcard rather
+	// than a trailing slash - both to stay out of the SPA's own way. See
+	// vnc.ViewerBasePath for the name; the wildcard is what suppresses
+	// ServeMux's implicit "/novnc" -> "/novnc/" redirect, which would
+	// otherwise fire on a path nginx has already stripped /router off and
+	// so bounce the browser to the origin root.
+	novncDir := os.Getenv("ROUTER_NOVNC_DIR")
+	if novncDir == "" {
+		novncDir = "/opt/novnc"
+	}
+	mux.Handle("GET /novnc/{path...}", http.StripPrefix("/novnc/", novncHandler(novncDir)))
+
 	mux.Handle("GET /", staticHandler(staticDir))
 
 	go normalizeCaddyFragments()

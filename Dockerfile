@@ -126,6 +126,46 @@ COPY --chown=root:root config/tailscale/tailscale-service.default.sh \
     config/caddy-adapter/caddy-adapter.default.sh \
     config/nginx/nginx.default.conf config/nginx/nginx-service.default.sh \
     config/tinyauth/tinyauth.default.sh /etc/router/
+# noVNC, for the VNC tab's BackendRFB targets - router serves the viewer
+# itself and bridges the browser's WebSocket to the target's raw RFB port
+# (backend/handlers_vnc.go's handleVncSocket), so a target only has to speak
+# RFB, the same thing a native client connects to. No websockify here: that
+# bridge is Go, in router-manager, which is what makes the viewer
+# first-party (same origin as the SPA, gated by router-manager's own lock)
+# instead of a user-registered app behind App Routes. See
+# backend/internal/vnc's package doc comment for the full reasoning.
+#
+# Tagged release tarball rather than a package: noVNC is in neither Arch's
+# official repos nor a reasonable AUR pin. Pinned via ARG so a bump is one
+# line and shows up in the build args.
+ARG NOVNC_VERSION=1.6.0
+RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" -o /tmp/novnc.tar.gz \
+    && mkdir -p /opt/novnc \
+    && tar xzf /tmp/novnc.tar.gz -C /opt/novnc --strip-components=1 \
+    && rm /tmp/novnc.tar.gz
+
+# noVNC hardening: never ask the server for a 0x0 desktop. With remote
+# resizing on (noVNC's `resize=remote`, the VNC tab's default) noVNC
+# forwards its own viewport size to the server as an RFB SetDesktopSize
+# request with no lower bound of its own - and a viewer laid out at 0x0 (an
+# iframe hidden with display:none, a page that never got a layout pass)
+# duly requests 0x0. A wlroots-based server (wayvnc) then passes that
+# through as a wlr-output-management custom mode, wlroots rejects any mode
+# with width/height <= 0 as a *protocol error*, and libwayland treats a
+# protocol error as fatal - so the VNC server dies, and against a target
+# that shuts down when its VNC server dies plus a client that auto-
+# reconnects, that becomes a restart loop. Observed for real against
+# roblox-studio-docker, which carried this same patch on its own vendored
+# copy; with the viewer living here instead, one copy of it covers every
+# target rather than each target needing its own.
+#
+# A sed rather than a vendored patch file because it's one line and has to
+# survive a NOVNC_VERSION bump legibly - the trailing `test` is what makes a
+# bump that moves this code *fail the build* instead of silently dropping
+# the guard.
+RUN sed -i '/_requestRemoteResize() {/,/^    }$/ s#^\( *\)const size = this\._screenSize();#\1const size = this._screenSize();\n\1// PATCHED (router-docker): never request a 0x0 desktop - see Dockerfile.\n\1if (size.w < 1 || size.h < 1) { return; }#' /opt/novnc/core/rfb.js \
+    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 1
+
 COPY --from=router-manager-build /router-manager /usr/local/bin/router-manager
 COPY --from=router-frontend-build /src/dist /etc/router/router-manager/static
 COPY --from=tinyauth-bin /tinyauth/tinyauth /usr/local/bin/tinyauth

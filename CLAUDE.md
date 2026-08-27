@@ -228,23 +228,62 @@ Routes fragment, see its own bullet below:
 - **VNC** (2026-08-25, `.claude/archive/router-vnc-tab-plan-done.md` in code-docker's
   own repo) — a browser-embedded viewer for GUI containers attached to router
   (`backend/internal/vnc`, `frontend/src/components/Vnc/`, `GET`/`POST`/`PUT`/`DELETE
-  /api/vnc/targets[/{name}]`, docs/vnc.md). Deliberately **not a new proxy mechanism**:
-  router's Caddy is stock (HTTP/WS only, no layer4 plugin), so raw RFB can never ride App
-  Routes/Dev Proxy — what gets proxied is the target's *web* VNC front end
-  (noVNC+websockify, typically `:6080`, running in front of an unchanged wayvnc on the
-  target's side), and App Routes is already the right carrier for that. So this package
-  owns only what App Routes has no concept of (a display Label, and which `Backend`'s
-  viewer URL shape to build) and drives an approutes fragment in lockstep with its own
-  registry (`/var/lib/code-docker-router/vnc/targets.json`) — one action registers both.
-  `List` re-reads approutes every call and reports drift (`RouteMissing`/`RouteDiverged`)
-  rather than caching what it wrote, so a fragment deleted or repointed from the App Routes
-  tab surfaces as a warning instead of a silently-404ing viewer; `Update` re-creates a
-  missing route rather than failing, the tab's own self-heal. `Backend` ships with exactly
-  one value (`novnc`) on purpose — the plan's decision was "noVNC와 Selkies를 나란히
-  (타겟별 선택 가능하게) 지원", so a second backend should be one more `backendViewer`
-  entry, not a schema change. Reaching a sibling project's container still needs that host
-  in `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS` (same `targetguard` allowlist App Routes uses —
-  no separate one). The viewer's iframe `src` is origin-sensitive and can't just use
+  /api/vnc/targets[/{name}]`, docs/vnc.md). **`Backend` is the axis this is organized
+  around, and it decides who serves the viewer** — read that package's own doc comment
+  before changing anything here:
+  - `rfb` (2026-08-27, the default): **router serves noVNC itself** — vendored into the
+    image at `/opt/novnc` (pinned `NOVNC_VERSION` ARG, plus the "never request a 0x0
+    desktop" patch roblox-studio-docker used to carry on its own copy, now in one place
+    for every target) and served by router-manager at `/router/novnc/`, with
+    `GET /api/vnc/targets/{name}/ws` bridging the browser's WebSocket to the target's
+    **raw RFB port** (`handleVncSocket`, `github.com/coder/websocket` +
+    `websocket.NetConn` + two `io.Copy`s). The target only has to speak RFB — the same
+    port a native client uses — so it needs no web stack at all. No App Route exists, so
+    no drift is possible; the viewer is same-origin with the SPA on every deployment
+    (`ViewerOrigin == "self"`, so `ROUTER_APP_ORIGIN` is irrelevant to it); and access
+    control is router-manager's own `authgate` rather than tinyauth — `validate` **refuses**
+    `RequireAuth` on this backend instead of ignoring it, because a flag that silently does
+    nothing would leave a target the user believes is gated wide open.
+  - `novnc`: the original shape — the target runs its own web VNC front end (`:6080`) and
+    router reverse-proxies it through an App Routes fragment kept in lockstep with the
+    registry (`/var/lib/code-docker-router/vnc/targets.json`), one action registering both.
+    `List` re-reads approutes every call and reports drift (`RouteMissing`/`RouteDiverged`)
+    rather than caching what it wrote, so a fragment deleted or repointed from the App
+    Routes tab surfaces as a warning instead of a silently-404ing viewer; `Update`
+    re-creates a missing route rather than failing, the tab's own self-heal.
+
+  `novnc` is **kept, not deprecated**: Selkies (the plan's "noVNC와 Selkies를 나란히
+  지원" decision) captures the target's own compositor and can't move into router, so it
+  has no raw RFB port to bridge and proxying its web front end is the only thing that can
+  work for it. The two are different transports, not an old and a new way to do one thing.
+  A future RDP backend belongs on the `rfb` side of that split.
+
+  Why the move happened at all: an App-Routes-carried viewer makes a first-party router
+  feature indistinguishable from a user-registered third-party app, and that leaked in
+  ways each needing their own workaround — no viewer at all on a dedicated
+  ROUTER_MANAGER_HOSTS domain (hence `ROUTER_APP_ORIGIN`), gating that needed the whole
+  tinyauth forward-auth path, every target shipping its own web VNC stack, and noVNC's
+  0x0-desktop bug patched separately in each of them. VNC is a protocol — a layer, like
+  DNS or TCP — not an app.
+
+  Two path collisions worth not rediscovering: the static mount is `/router/novnc/`, not
+  `/router/vnc/`, because the SPA's own VNC tab is at `/router/vnc` and Go's ServeMux
+  installs an implicit `/vnc` → `/vnc/` redirect for a slash-terminated pattern — which,
+  since nginx has already stripped `/router` by then, bounces the browser to `/vnc/` at
+  the **origin root**, out of the SPA entirely (confirmed live, and a 301, so it poisons
+  the browser cache). The route is registered as `GET /novnc/{path...}` rather than
+  `/novnc/` for the same reason, and `novncHandler` refuses a trailing slash *and* the
+  empty post-`StripPrefix` path so `http.FileServer` can't list noVNC's whole tree. And
+  router's nginx needed `proxy_http_version 1.1` + `Upgrade`/`Connection` on **both**
+  `/router/` locations (shared hostname and the ROUTER_MANAGER_HOSTS block) — without
+  them router-manager answers `426 Upgrade Required` and the viewer loads but never
+  connects.
+
+  Reaching a sibling project's container still needs that host in
+  `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS` (same `targetguard` allowlist App Routes uses —
+  no separate one), and `handleVncSocket` re-checks it per connection rather than trusting
+  what was allowed at save time. For a `novnc`-backend target the viewer's iframe `src` is
+  origin-sensitive and can't just use
   `window.location.origin`: `/app/` is served only on the *shared* hostname's nginx block,
   never on a dedicated `ROUTER_MANAGER_HOSTS` domain (that block deliberately serves
   router-manager alone — putting user-registered app content on router-manager's own origin
@@ -262,7 +301,9 @@ Routes fragment, see its own bullet below:
   Known limitation, verified live and inherited from the
   target side rather than introduced here: wayvnc's `VNC_PASSWORD` makes it demand VeNCrypt
   X509Plain, which current noVNC doesn't implement (`Unsupported security types (types:
-  262)`) — gate the web path with the App-Routes-shared tinyauth `requireAuth` instead.
+  262)`), and moving the viewer into router doesn't change that — it's noVNC's own gap.
+  Gate the web path with router-manager's password (`rfb`) or the App-Routes-shared
+  tinyauth `requireAuth` (`novnc`) instead.
   `Target.ResizeMode` (2026-08-25, `remote`/`scale`/`off`, default `remote`, `""` on
   targets stored before it existed = the default) is the one target field that changes the
   viewer URL rather than the App Route: `remote` asks the target's own server to resize its

@@ -116,3 +116,60 @@ func TestRouteStateDetectsDrift(t *testing.T) {
 		t.Fatalf("routeState(raw-only) = (%v, %v), want (false, true)", missing, diverged)
 	}
 }
+
+func TestViewerPathRFB(t *testing.T) {
+	// The two parameters rfbViewerPath's own comment calls load-bearing:
+	// host= pinned empty (so noVNC resolves its socket URL relative to the
+	// page rather than from stored settings), and a "../"-relative path (so
+	// the browser derives the same /router prefix it was served under,
+	// which nginx strips before router-manager ever sees it).
+	got := viewerPath(Target{Name: "studio-vnc", Backend: BackendRFB})
+	want := "/router/novnc/vnc.html?autoconnect=1&host=&path=..%2Fapi%2Fvnc%2Ftargets%2Fstudio-vnc%2Fws&reconnect=1&resize=remote"
+	if got != want {
+		t.Fatalf("viewerPath() = %q, want %q", got, want)
+	}
+}
+
+func TestViewerOriginByBackend(t *testing.T) {
+	// The whole point of BackendRFB for the dedicated-domain case: its
+	// viewer is served by router-manager, so it never needs an origin the
+	// SPA has to be told about.
+	if got := viewerOrigin(Target{Backend: BackendRFB}); got != ViewerOriginSelf {
+		t.Fatalf("viewerOrigin(rfb) = %q, want %q", got, ViewerOriginSelf)
+	}
+	if got := viewerOrigin(Target{Backend: BackendNoVNC}); got != ViewerOriginApp {
+		t.Fatalf("viewerOrigin(novnc) = %q, want %q", got, ViewerOriginApp)
+	}
+}
+
+func TestRouteStateIgnoresRouterSideBackends(t *testing.T) {
+	// A BackendRFB target never creates an App Route, so the absence of one
+	// is the correct state - reporting it as drift would put a permanent
+	// "App Route 없음" warning on every such target.
+	target := Target{Name: "studio-vnc", Target: "vnc-only:5900", Backend: BackendRFB}
+	if missing, diverged := routeState(nil, target); missing || diverged {
+		t.Fatalf("routeState(rfb, no routes) = (%v, %v), want (false, false)", missing, diverged)
+	}
+}
+
+func TestValidateRejectsRequireAuthOnRouterSideBackend(t *testing.T) {
+	// Refused rather than ignored: silently accepting it would leave a
+	// target the user believes is behind a login wide open.
+	err := validate(Target{Name: "studio-vnc", Target: "code-docker:5900", Backend: BackendRFB, RequireAuth: true})
+	if err == nil || !strings.Contains(err.Error(), "인증 요구") {
+		t.Fatalf("validate() = %v, want a requireAuth rejection", err)
+	}
+	// ...and the same target without it is fine.
+	if err := validate(Target{Name: "studio-vnc", Target: "code-docker:5900", Backend: BackendRFB}); err != nil {
+		t.Fatalf("validate() = %v, want nil", err)
+	}
+}
+
+func TestBackendsOrderPutsRFBFirst(t *testing.T) {
+	// The frontend's picker defaults to backends[0], so this order is the
+	// default-backend decision, not cosmetics.
+	got := Backends()
+	if len(got) == 0 || got[0] != BackendRFB {
+		t.Fatalf("Backends() = %v, want %q first", got, BackendRFB)
+	}
+}

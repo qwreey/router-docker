@@ -12,20 +12,34 @@ function looksUnreachable(target: string) {
   return host === '127.0.0.1' || host === 'localhost' || host === ''
 }
 
-// A raw RFB port typed in by mistake is the single most likely error in
-// this form (it's the port SETUP.md-style docs and native VNC clients use,
-// and the plan doc's whole 경로 B exists precisely because that port can't
-// be carried here) - so call it out rather than letting it fail as an
-// opaque proxy error later.
+// Which port to type is the single most likely error in this form, and the
+// right answer *inverts* between the two backends: rfb wants the raw RFB
+// port (router dials it and speaks RFB itself), novnc wants the target's
+// own web VNC port (router reverse-proxies HTTP to it). Getting it backwards
+// fails as an opaque proxy/connection error much later, so call it out here.
 const RAW_RFB_PORTS = new Set(['5900', '5901', '5902'])
+const WEB_VNC_PORTS = new Set(['6080', '6081'])
 
-function looksLikeRawRfb(target: string) {
+function portLooksWrong(backend: string, target: string): string | null {
   const port = target.split(':')[1]
-  return port !== undefined && RAW_RFB_PORTS.has(port)
+  if (port === undefined) return null
+  if (backend === 'rfb' && WEB_VNC_PORTS.has(port)) {
+    return 'web'
+  }
+  if (backend !== 'rfb' && RAW_RFB_PORTS.has(port)) {
+    return 'rfb'
+  }
+  return null
 }
 
 const BACKEND_LABEL: Record<string, string> = {
-  novnc: 'noVNC',
+  rfb: 'RFB — router가 직접 중계 (권장)',
+  novnc: '대상이 서비스하는 웹 VNC',
+}
+
+const BACKEND_HINT: Record<string, string> = {
+  rfb: 'router가 noVNC 뷰어를 자기 origin에서 직접 서비스하고, 브라우저의 WebSocket을 대상의 raw RFB 포트(보통 5900)로 중계합니다. 대상은 VNC만 할 줄 알면 되고 웹 서버가 필요 없습니다 — 네이티브 클라이언트가 붙는 그 포트 그대로입니다. App Route를 만들지 않으며, 접근 제어는 router-manager 자신의 비밀번호가 담당합니다.',
+  novnc: '대상이 이미 웹 VNC 프런트엔드(noVNC/websockify 등)를 돌리고 있고, router는 그걸 App Route로 중계만 합니다. 대상 주소는 그 웹 포트(보통 6080)입니다. raw RFB 포트가 없는 스택(Selkies 등)에는 이 방식만 쓸 수 있습니다.',
 }
 
 // Unlike backends (server-supplied, see the picker below), the resize modes
@@ -63,7 +77,7 @@ export function TargetDialog({
   const [name, setName] = useState(existing?.name ?? '')
   const [label, setLabel] = useState(existing?.label ?? '')
   const [target, setTarget] = useState(existing?.target ?? '')
-  const [backend, setBackend] = useState(existing?.backend ?? backends[0] ?? 'novnc')
+  const [backend, setBackend] = useState(existing?.backend ?? backends[0] ?? 'rfb')
   const [requireAuth, setRequireAuth] = useState(existing?.requireAuth ?? false)
   // '' (a target predating this field) resolves to the backend's default
   // rather than being offered as a fourth, blank option.
@@ -73,7 +87,17 @@ export function TargetDialog({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    onSave({ name: name.trim(), label: label.trim(), target: target.trim(), backend, requireAuth, resizeMode })
+    // requireAuth is forced off for a backend that has no App Route - the
+    // API refuses the combination, and a value left over from switching the
+    // picker would otherwise make saving fail with a confusing error.
+    onSave({
+      name: name.trim(),
+      label: label.trim(),
+      target: target.trim(),
+      backend,
+      requireAuth: backend === 'rfb' ? false : requireAuth,
+      resizeMode,
+    })
   }
 
   return (
@@ -112,12 +136,18 @@ export function TargetDialog({
             placeholder="vnc-only:6080"
             required
           />
-          {looksLikeRawRfb(target) && (
+          {portLooksWrong(backend, target) === 'rfb' && (
             <p className="vnc-hint vnc-hint-warn">
-              <code>{target}</code>의 포트는 raw RFB 포트로 보입니다. router의 Caddy는 HTTP/WebSocket만
-              중계할 수 있어 raw RFB는 태울 수 없습니다 — wayvnc 앞에 붙인 noVNC/websockify의 웹 포트(기본
-              <code>6080</code>)를 쓰세요. 네이티브 VNC 클라이언트로 raw 포트에 붙는 건 Net 관리 탭의
-              Forwards가 담당합니다.
+              <code>{target}</code>의 포트는 raw RFB 포트로 보입니다. 지금 고른 백엔드는 대상이 직접
+              서비스하는 <strong>웹 VNC 포트</strong>(보통 <code>6080</code>)를 기대합니다 — raw RFB 포트에
+              바로 붙이려면 백엔드를 <strong>RFB</strong>로 바꾸세요.
+            </p>
+          )}
+          {portLooksWrong(backend, target) === 'web' && (
+            <p className="vnc-hint vnc-hint-warn">
+              <code>{target}</code>의 포트는 웹 VNC(noVNC/websockify) 포트로 보입니다. <strong>RFB</strong>{' '}
+              백엔드는 raw RFB 포트(보통 <code>5900</code>)를 기대합니다 — 대상의 웹 프런트엔드를 그대로
+              쓰려면 백엔드를 <strong>대상이 서비스하는 웹 VNC</strong>로 바꾸세요.
             </p>
           )}
           {looksUnreachable(target) && (
@@ -136,7 +166,7 @@ export function TargetDialog({
               </option>
             ))}
           </select>
-          <p className="vnc-hint">대상 컨테이너가 실제로 돌리고 있는 웹 VNC 스택을 고르세요.</p>
+          <p className="vnc-hint">{BACKEND_HINT[backend] ?? ''}</p>
         </div>
         <div className="form-field">
           <label htmlFor="vnc-resize">창 크기 변경 처리</label>
@@ -153,16 +183,29 @@ export function TargetDialog({
           </select>
           <p className="vnc-hint">{RESIZE_HINT[resizeMode]}</p>
         </div>
-        <label className="vnc-checkbox-option">
-          <input type="checkbox" checked={requireAuth} onChange={(e) => setRequireAuth(e.target.checked)} />
-          인증 요구 (tinyauth)
-        </label>
-        {requireAuth && (
+        {/* tinyauth is an App-Routes-level thing (a forward_auth in the app's
+            own Caddyfile fragment), so it has nothing to act on for a backend
+            that doesn't create one - the backend refuses the combination
+            rather than accepting a flag that would do nothing. */}
+        {backend === 'rfb' ? (
           <p className="vnc-hint">
-            tinyauth에 사용자가 최소 한 명 등록되어 있어야 하고(설정 &gt; tinyauth 탭), 로그인 화면을 서비스할{' '}
-            <code>TINYAUTH_HOSTS</code>가 <code>.env.router</code>에 설정되어 있어야
-            합니다. 둘 중 하나라도 빠지면 이 대상은 로그인 페이지에 도달할 방법이 없어 그대로 접속이 막힙니다.
+            이 백엔드에는 별도의 "인증 요구" 설정이 없습니다 — 뷰어와 그 WebSocket을 router-manager가 직접
+            서비스하므로, <strong>router-manager 자신의 비밀번호</strong>(설정 탭)가 그대로 접근 제어가 됩니다.
           </p>
+        ) : (
+          <>
+            <label className="vnc-checkbox-option">
+              <input type="checkbox" checked={requireAuth} onChange={(e) => setRequireAuth(e.target.checked)} />
+              인증 요구 (tinyauth)
+            </label>
+            {requireAuth && (
+              <p className="vnc-hint">
+                tinyauth에 사용자가 최소 한 명 등록되어 있어야 하고(설정 &gt; tinyauth 탭), 로그인 화면을 서비스할{' '}
+                <code>TINYAUTH_HOSTS</code>가 <code>.env.router</code>에 설정되어 있어야 합니다. 둘 중 하나라도
+                빠지면 이 대상은 로그인 페이지에 도달할 방법이 없어 그대로 접속이 막힙니다.
+              </p>
+            )}
+          </>
         )}
         {error && <ErrorBanner message={error} />}
         <div className="vnc-form-actions">

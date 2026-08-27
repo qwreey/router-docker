@@ -8,10 +8,12 @@ import { ConfirmDialog } from '../common/ConfirmDialog'
 import { withViewTransition } from '../../utils/viewTransition'
 import { TargetDialog } from './TargetDialog'
 import { useViewerOrigin } from './useViewerOrigin'
+import { useAuthStatus } from '../common/useAuthStatus'
 import './Vnc.css'
 
 const BACKEND_LABEL: Record<string, string> = {
-  novnc: 'noVNC',
+  rfb: 'RFB (router 중계)',
+  novnc: '대상의 웹 VNC',
 }
 
 // '' is a target stored before resizeMode existed; the backend resolves it
@@ -169,7 +171,15 @@ export function Vnc() {
   const [deleting, setDeleting] = useState(false)
   const [openName, setOpenName] = useState<string | null>(null)
 
-  const { origin: viewerOrigin, loading: originLoading } = useViewerOrigin()
+  const openTarget = targets.find((t) => t.name === openName) ?? null
+  const { origin: viewerOrigin, loading: originLoading } = useViewerOrigin(openTarget)
+  // A BackendRFB viewer's WebSocket goes through router-manager's own
+  // password gate, so a locked session gets a viewer that loads and then
+  // silently fails to connect. Say so instead.
+  const { status: authStatus } = useAuthStatus()
+  const lockedOut = Boolean(
+    openTarget?.viewerOrigin === 'self' && authStatus?.required && !authStatus.unlocked,
+  )
 
   const load = useCallback(async () => {
     try {
@@ -231,8 +241,7 @@ export function Vnc() {
     }
   }
 
-  const openTarget = targets.find((t) => t.name === openName) ?? null
-  const viewerBlocked = !originLoading && viewerOrigin === null
+  const viewerBlocked = Boolean(openTarget) && !originLoading && viewerOrigin === null
 
   return (
     <section>
@@ -240,20 +249,22 @@ export function Vnc() {
         <h1>VNC</h1>
       </div>
       <p className="section-description">
-        router에 붙어 있는 GUI 컨테이너의 화면을 브라우저에서 바로 보고 조작합니다. 대상 컨테이너가 띄운 웹 VNC
-        프런트엔드(noVNC/websockify)를 App Route로 태워 여기 임베드하는 방식이라, 실제 중계는 App Routes와 완전히
-        같은 경로를 씁니다 — 이 탭은 그 위에 뷰어와 대상 목록만 얹습니다.
+        router에 붙어 있는 GUI 컨테이너의 화면을 브라우저에서 바로 보고 조작합니다. 기본 방식(RFB)은 router가
+        noVNC 뷰어를 직접 서비스하고 대상의 raw RFB 포트로 중계하는 것이라, 대상은 VNC만 할 줄 알면 되고 웹
+        서버가 필요 없습니다. 대상이 이미 자기 웹 VNC 프런트엔드를 돌리고 있다면 그걸 App Route로 태우는 예전
+        방식도 그대로 쓸 수 있습니다.
       </p>
 
       <div className="card">
         <div className="info-note">
           <span aria-hidden="true">ℹ</span>
           <span>
-            대상 주소는 raw RFB 포트(<code>5900</code>)가 아니라 <strong>웹 VNC 포트</strong>(noVNC/websockify,
-            보통 <code>6080</code>)여야 합니다. router의 Caddy는 HTTP/WebSocket만 중계할 수 있어 raw RFB는 태울 수
-            없습니다 — 네이티브 VNC 클라이언트로 붙고 싶다면 대신 <strong>Net 관리</strong> 탭의 Forwards를
-            쓰세요. 대상 호스트는 App Routes와 같은 allowlist를 통과해야 하며, sibling 프로젝트의 컨테이너를
-            추가하려면 <code>ROUTER_EXTRA_ALLOWED_TARGET_HOSTS</code>에 그 호스트를 넣어야 합니다.
+            대상 주소의 포트는 백엔드에 따라 다릅니다 — <strong>RFB</strong>는 raw RFB 포트(보통{' '}
+            <code>5900</code>), <strong>대상이 서비스하는 웹 VNC</strong>는 그 웹 포트(보통 <code>6080</code>)를
+            받습니다. 어느 쪽이든 대상 호스트는 App Routes와 같은 allowlist를 통과해야 하며, sibling 프로젝트의
+            컨테이너를 추가하려면 <code>ROUTER_EXTRA_ALLOWED_TARGET_HOSTS</code>에 그 호스트를 넣어야 합니다.
+            브라우저가 아니라 네이티브 VNC 클라이언트로 붙고 싶다면 <strong>Net 관리</strong> 탭의 Forwards를
+            쓰세요.
           </span>
         </div>
 
@@ -283,7 +294,10 @@ export function Vnc() {
                     <td>
                       <div className="vnc-name-cell">
                         <span>{info.label || info.name}</span>
-                        <code>/app/{info.name}/</code>
+                        {/* Only an App-Route-backed target actually answers at
+                            /app/<name>/ - showing that path for a router-side
+                            one would name a URL that 404s. */}
+                        {info.viewerOrigin === 'app' && <code>/app/{info.name}/</code>}
                         {info.routeMissing && (
                           <span className="vnc-warn">App Route 없음 — 편집 후 저장하면 다시 만들어집니다</span>
                         )}
@@ -297,7 +311,16 @@ export function Vnc() {
                     </td>
                     <td>{BACKEND_LABEL[info.backend] ?? info.backend}</td>
                     <td>{RESIZE_LABEL[info.resizeMode] ?? info.resizeMode}</td>
-                    <td>{info.requireAuth ? '요구' : '없음'}</td>
+                    <td>
+                      {/* A router-side backend has no App Route for tinyauth to sit in
+                          front of - router-manager's own password gates its socket
+                          instead, so "없음" would be actively misleading here. */}
+                      {info.viewerOrigin === 'self'
+                        ? 'router 잠금'
+                        : info.requireAuth
+                          ? 'tinyauth'
+                          : '없음'}
+                    </td>
                     <td className="table-actions-col">
                       <button
                         type="button"
@@ -346,6 +369,18 @@ export function Vnc() {
         </div>
       </div>
 
+      {lockedOut && (
+        <div className="card">
+          <div className="info-note">
+            <span aria-hidden="true">⚠</span>
+            <span>
+              router-manager가 잠겨 있어 뷰어가 대상에 연결할 수 없습니다 — 이 백엔드는 App Routes/tinyauth가
+              아니라 router-manager 자신의 비밀번호로 보호됩니다. 사이드바 아래쪽의 잠금 해제를 먼저 하세요.
+            </span>
+          </div>
+        </div>
+      )}
+
       {viewerBlocked && openTarget && (
         <div className="card">
           <div className="info-note">
@@ -363,7 +398,7 @@ export function Vnc() {
         </div>
       )}
 
-      {openTarget && viewerOrigin && (
+      {openTarget && viewerOrigin && !lockedOut && (
         <Viewer
           key={viewerOrigin + openTarget.viewerPath}
           info={openTarget}

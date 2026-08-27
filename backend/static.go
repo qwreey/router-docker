@@ -51,3 +51,37 @@ func staticHandler(dir string) http.Handler {
 		http.ServeFile(w, r, index)
 	})
 }
+
+// novncHandler serves router's own vendored copy of noVNC (see the
+// Dockerfile's NOVNC_VERSION stage) for BackendRFB targets - the viewer
+// half of what internal/vnc's package doc calls "router owning the client
+// side". It is a plain file server with two deliberate differences from
+// staticHandler above:
+//
+//   - no SPA fallback. A missing file here is a missing file, not a route;
+//     falling back to index.html would answer a bad asset request with
+//     HTML and produce the same MIME-type confusion staticHandler's own
+//     comment describes.
+//   - any path ending in "/" is refused, which is what turns off
+//     http.FileServer's directory listings (noVNC ships no index.html at
+//     its root, so /novnc/ would otherwise enumerate its whole tree). Every
+//     URL the VNC tab produces names vnc.html explicitly, so nothing legit
+//     ends in a slash. The empty path is the same case and has to be
+//     spelled out separately: http.StripPrefix("/novnc/") turns a request
+//     for exactly "/novnc/" into "", which has no trailing slash to test - and
+//     that is precisely the request that lists the whole tree.
+//
+// Deliberately NOT behind the auth gate even when one is configured: this
+// is upstream noVNC's own static JS and HTML, identical for every
+// deployment and carrying nothing about this one. The socket it tries to
+// open (handleVncSocket) is the gate.
+func novncHandler(dir string) http.Handler {
+	fileServer := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}

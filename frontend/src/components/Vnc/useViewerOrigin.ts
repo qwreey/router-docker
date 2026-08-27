@@ -1,44 +1,52 @@
 import { useMemo } from 'react'
 import { useAuthStatus } from '../common/useAuthStatus'
+import type { VncTargetInfo } from '../../api/types'
 
-// Which origin the VNC viewer page (/app/<name>/...) has to be loaded from
-// — NOT necessarily the one this SPA is served from, which is the whole
-// reason this hook exists rather than a bare window.location.origin.
+// Which origin a VNC viewer page has to be loaded from — NOT necessarily
+// the one this SPA is served from, which is the whole reason this hook
+// exists rather than a bare window.location.origin.
 //
-// router's nginx serves /app/ only on the *shared* hostname's server block.
-// The dedicated ROUTER_MANAGER_HOSTS block deliberately serves nothing but
-// router-manager itself (see router/config/nginx/nginx-service.default.sh),
-// because putting user-registered, possibly-third-party app content on
-// router-manager's own origin is exactly the ambient-cookie exposure that
-// whole feature exists to close. So when the SPA is being served from a
-// dedicated router-manager domain, `/app/...` on the current origin does
-// not resolve to the viewer at all — it falls through to static.go's
-// SPA-shell fallback and renders this same page inside itself.
+// It depends on the target's own viewerOrigin (see
+// router/backend/internal/vnc.Info):
 //
-// Four cases, in priority order:
+//   'self' — router-manager serves the viewer itself (a BackendRFB target,
+//     the default). Always this page's own origin, on every deployment,
+//     with nothing to configure. This is one of the reasons that backend
+//     exists.
+//   'app'  — the viewer is the target's own, reached through an /app/
+//     path. router's nginx serves /app/ only on the *shared* hostname; the
+//     dedicated ROUTER_MANAGER_HOSTS block deliberately serves nothing but
+//     router-manager itself (see config/nginx/nginx-service.default.sh),
+//     because putting user-registered, possibly-third-party app content on
+//     router-manager's own origin is exactly the ambient-cookie exposure
+//     that whole feature exists to close. So on a dedicated domain,
+//     `/app/...` doesn't resolve to the viewer at all — it falls through to
+//     static.go's SPA-shell fallback and renders this same page inside
+//     itself.
+//
+// For 'app', four cases in priority order:
 //  1. ?origin= — set by webmanager's RouterFrame.tsx, which knows its own
 //     (shared) origin and passes it into the embed. This is the normal path
 //     for the webmanager VNC tab once ROUTER_MANAGER_HOSTS is configured.
 //  2. Served from a ROUTER_MANAGER_HOSTS domain, with ROUTER_APP_ORIGIN
-//     configured: that value. Cross-origin to this page, deliberately —
-//     that separation IS the dedicated domain's purpose, and nothing about
-//     the viewer needs same-origin access (Vnc.tsx's fullscreen delegation
-//     already has a cross-origin fallback). Without this the VNC tab was
-//     simply unusable on a dedicated domain, which is a surprising place to
-//     lose a feature given the domain is the *more* locked-down one.
-//  3. Served from a ROUTER_MANAGER_HOSTS domain with no ?origin= and no
-//     ROUTER_APP_ORIGIN: null — there is no origin we can honestly derive,
-//     so the tab says so (and names the env var) instead of rendering an
-//     iframe that would silently show its own shell back.
-//  4. Otherwise the shared origin already is the current one (/router/ on
-//     the main hostname, the default when ROUTER_MANAGER_HOSTS is unset).
-export function useViewerOrigin(): { origin: string | null; loading: boolean } {
+//     configured: that value, cross-origin to this page by design.
+//  3. Served from a ROUTER_MANAGER_HOSTS domain with neither: null — there
+//     is no origin we can honestly derive, so the tab says so (and names
+//     the env var) instead of rendering an iframe that would silently show
+//     its own shell back.
+//  4. Otherwise the shared origin already is the current one.
+export function useViewerOrigin(info: VncTargetInfo | null): { origin: string | null; loading: boolean } {
   const { status } = useAuthStatus()
 
   const paramOrigin = useMemo(() => {
     const raw = new URLSearchParams(window.location.search).get('origin')
     return parseOrigin(raw)
   }, [])
+
+  // No target open: nothing to resolve, and reporting "loading" would leave
+  // the tab's own placeholder waiting on an answer it never needs.
+  if (!info) return { origin: null, loading: false }
+  if (info.viewerOrigin === 'self') return { origin: window.location.origin, loading: false }
 
   if (paramOrigin) return { origin: paramOrigin, loading: false }
   // status===null only means the auth-status fetch is still in flight; we

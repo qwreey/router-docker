@@ -143,6 +143,12 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
             return 403 \"blocked: reached via tailscale's automatic loopback forwarding, not the published port - see NGINX_BLOCK_LOOPBACK in example-env\n\";
         }
 
+        # Same as the shared hostname's own server block: the VNC tab's RFB
+        # bridge is a long-lived WebSocket that can legitimately sit idle
+        # (a desktop with nothing moving on it sends nothing), and nginx's
+        # 60s default would cut it.
+        proxy_read_timeout 3600s;
+
         # router/frontend's own api/client.ts hardcodes every API call under
         # /router/api/... regardless of which origin the SPA is actually
         # served from (see router/frontend/src/api/client.ts) - so this
@@ -153,6 +159,12 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
         location /router/ {
             proxy_pass http://unix:/run/router-manager.sock:/;
             proxy_set_header Host \$host;
+            # Same WebSocket upgrade the shared hostname's own /router/
+            # location needs - the VNC tab's RFB bridge lives under this
+            # prefix. See nginx.default.conf's copy.
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection \$connection_upgrade;
         }
 
         # The SPA itself (and its relative-pathed JS/CSS - see

@@ -69,9 +69,16 @@ export interface VncTarget {
 // Mirrors router/backend/internal/vnc.Info — a target plus live drift
 // detection against the App Route carrying it. routeMissing = the fragment
 // is gone entirely; routeDiverged = it exists but points somewhere else (or
-// was hand-edited past what App Routes can parse).
+// was hand-edited past what App Routes can parse). Both are always false
+// for a backend that doesn't use an App Route at all.
+//
+// viewerOrigin says which origin viewerPath is relative to: 'self' means
+// router-manager serves the viewer, so it's always this page's own origin;
+// 'app' means it's an /app/ path, which only the shared hostname serves.
+// See components/Vnc/useViewerOrigin.ts.
 export interface VncTargetInfo extends VncTarget {
   viewerPath: string
+  viewerOrigin: 'self' | 'app'
   routeMissing: boolean
   routeDiverged: boolean
 }

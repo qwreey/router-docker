@@ -160,8 +160,10 @@ router 자신의 supervisord 프로그램으로 돕니다 — `Dockerfile`이 �
 여러 개 가능, `.env.router`)를 설정하면 router의 nginx가 그 호스트네임에 대해
 tinyauth 로그인 UI를 루트에서 직접 서비스하는 `server{}` 블록을 만듭니다.
 **비워두면(기본값) 로그인 화면에 도달할 방법 자체가 없어서 "인증 요구"를 켠
-Dev Proxy/App Routes/VNC 대상은 전부 접속 불가가 됩니다** — "인증 요구"를 켠
-대상이 안 열린다면 가장 먼저 의심할 곳입니다. `TINYAUTH_APPURL`은 설정되어
+Dev Proxy/App Routes/`novnc` 백엔드 VNC 대상은 전부 접속 불가가 됩니다**
+(`rfb` 백엔드 VNC 대상은 tinyauth가 아니라 router-manager 자신의 비밀번호로
+잠기므로 이 값과 무관합니다) — "인증 요구"를 켠 대상이 안 열린다면 가장
+먼저 의심할 곳입니다. `TINYAUTH_APPURL`은 설정되어
 있는데 `TINYAUTH_HOSTS`가 비어 있으면 router의 nginx가 시작 시 경고를 남깁니다.
 이 호스트네임도 DNS 레코드와 바깥 리버스 프록시 등록이 필요합니다 — router가
 서비스하는 다른 hostname들과 동일합니다.
@@ -335,17 +337,20 @@ router-manager에 직접 연결합니다(SPA + API 전부) — 그 도메인에�
 
 전용 도메인은 일부러 router-manager 자신만 서비스하고 `/app/`은 서비스하지
 않습니다 — 사용자가 등록한(신뢰할 수 없는) 앱 콘텐츠를 router-manager와 같은
-origin에 두지 않는 것 자체가 이 격리의 목적입니다. 그 결과 전용 도메인을
-**직접** 열어 VNC 탭에 들어가면 뷰어가 불러올 origin을 알 수 없어 뷰어를 아예
-띄우지 못합니다 — `ROUTER_APP_ORIGIN`(`example-env.router`)에 `/app/`을 실제로
-서비스하는 공유 호스트네임을 `https://code.example.com`처럼 적어두면 전용
-도메인에서도 VNC 뷰어가 동작합니다(뷰어 iframe만 cross-origin이 되고, 그
+origin에 두지 않는 것 자체가 이 격리의 목적입니다. VNC 탭의 `rfb` 백엔드
+대상은 App Route도 `/app/`도 거치지 않고 router-manager 자신이 뷰어를
+서비스하므로 이 문제 자체가 없고, 전용 도메인을 직접 열어도 그대로
+동작합니다. 영향을 받는 건 `novnc` 백엔드 대상뿐입니다: 전용 도메인을
+**직접** 열어 그런 대상을 보려고 하면 뷰어가 불러올 origin을 알 수 없어 뷰어를
+아예 띄우지 못합니다 — `ROUTER_APP_ORIGIN`(`example-env.router`)에 `/app/`을
+실제로 서비스하는 공유 호스트네임을 `https://code.example.com`처럼 적어두면
+전용 도메인에서도 그 뷰어가 동작합니다(뷰어 iframe만 cross-origin이 되고, 그
 분리야말로 전용 도메인이 존재하는 이유이니 문제가 아닙니다). `ROUTER_MANAGER_HOSTS`를
-안 쓰면 `ROUTER_APP_ORIGIN`도 설정할 필요가 없습니다(그때는 SPA가 열려 있는
-origin이 곧 `/app/`을 서비스합니다) — webmanager에 내장된 VNC 탭은 자신의
-origin을 `?origin=`으로 직접 넘겨주므로 이 값 없이도 이미 정상 동작합니다.
-자세한 증상은
-[vnc.md의 관련 절](vnc.md#전용-관리-도메인routermanagerhosts에서는-뷰어가-열리지-않습니다)
+안 쓰거나 `rfb` 백엔드만 쓴다면 `ROUTER_APP_ORIGIN`도 설정할 필요가
+없습니다(안 쓰는 경우는 SPA가 열려 있는 origin이 곧 `/app/`을 서비스합니다) —
+webmanager에 내장된 VNC 탭은 자신의 origin을 `?origin=`으로 직접 넘겨주므로
+이 값 없이도 이미 정상 동작합니다. 자세한 증상은
+[vnc.md의 관련 절](vnc.md#novnc-백엔드와-전용-관리-도메인routermanagerhosts)
 참고.
 
 **webmanager에 내장된 Dev Proxy/App Routes/Tailscale/DNS/Net 관리/tinyauth 탭은 항상
