@@ -107,6 +107,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/system/env-version", handleEnvVersion)
+
+	// Rewritten PWA manifest for a vhost-published app (internal/vhostpwa).
+	// Ungated on purpose — see handleVhostManifest.
+	mux.HandleFunc("GET /api/vhost-pwa/{name}/manifest", handleVhostManifest)
 	mux.HandleFunc("POST /api/system/env-version/dismiss", handleDismissEnvVersion)
 
 	mux.HandleFunc("POST /api/auth/unlock", handleAuthUnlock)

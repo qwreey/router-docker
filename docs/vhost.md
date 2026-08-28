@@ -70,6 +70,53 @@ note.example.com {
 컨테이너의 서비스명/별칭입니다. router 자신을 가리키는 값
 (`localhost`/`127.0.0.1`/`::1`/`router`/`forward`)은 거부합니다.
 
+## PWA 이름/아이콘 바꾸기 (`ROUTER_VHOST_PWA_*`)
+
+같은 앱의 인스턴스를 두 개 쓰면 설치했을 때 구분이 안 됩니다. 개인 Trilium과 여기 붙인
+프로젝트용 Trilium은 둘 다 "Trilium Notes"에 같은 아이콘이라 홈 화면에서 어느 쪽인지
+알 수 없습니다. 앱 쪽에는 이걸 바꿀 설정이 없고(매니페스트가 빌드에 박혀 있는 정적
+파일), 앞단에서 고치는 수밖에 없습니다.
+
+```sh
+ROUTER_VHOST_PWA_TRILIUM="Selene Notes|Selene"
+ROUTER_VHOST_PWA_ICON_TRILIUM="/var/lib/code-docker-router/pwa/trilium.png"   # 선택
+```
+
+- 형식은 `"<앱 이름>|<짧은 이름>[|<매니페스트 경로>]"` 이고, 매니페스트 경로 기본값은
+  `/manifest.webmanifest` 입니다 (code-server처럼 `/manifest.json`을 쓰는 앱만 세 번째
+  필드를 채우세요).
+- **통째로 새로 쓰지 않고 병합합니다.** 앱의 원래 매니페스트를 가져와 위 키만
+  갈아끼우므로 `display_override`, `share_target`, `protocol_handlers`처럼 우리가 모르는
+  필드도 그대로 살아남습니다. 손으로 베껴 쓴 매니페스트는 앱이 업데이트되면 조용히
+  낡습니다 — 그걸 피하려고 병합입니다.
+- 아이콘은 이 컨테이너 안의 PNG 절대 경로입니다. `icons`를 그 파일 하나로 바꾸고 그 앱의
+  도메인에서 `/_pwa-icon.png`로 서비스합니다. **`sizes`는 파일에서 실제 크기를 읽어**
+  넣습니다(선언한 크기와 파일이 다르면 브라우저가 조용히 거르는 쪽이라). 파일이 없거나
+  PNG가 아니면 아이콘만 건너뛰고 로그에 남깁니다.
+- 병합은 router-manager가 합니다(`backend/internal/vhostpwa`). 실패하면 nginx가
+  `error_page`로 **앱의 원본 매니페스트를 그대로** 내보냅니다 — 최악의 경우 이름이 원래
+  이름으로 설치될 뿐, 설치가 안 되지는 않습니다.
+
+### 인증 예외
+
+안드로이드에서 "앱 설치"(WebAPK)가 되려면 바깥 프록시에서 **매니페스트 경로와
+`/_pwa-icon.png`** 를 인증 없이 열어야 합니다. WebAPK는 폰이 아니라 구글 서버가 만들고,
+그 서버에는 사용자 쿠키가 없습니다.
+
+```caddyfile
+note.example.com {
+    @not_pwa_public {
+        not path /manifest.webmanifest /_pwa-icon.png
+    }
+    import authentik-proxy
+    import authentik-auth @not_pwa_public
+    reverse_proxy http://routerip:80
+}
+```
+
+아이콘 경로를 앱마다 다른 경로가 아니라 `/_pwa-icon.png` 하나로 고정한 이유가 이겁니다 —
+어떤 앱을 붙이든 예외 목록에 적을 이름이 같습니다.
+
 ## 동작 세부
 
 - **대상 컨테이너가 안 떠 있어도 router는 정상 기동합니다.** upstream을 nginx 변수로

@@ -358,6 +358,25 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   `proxy_pass`, since nginx can't infer the passed URI once a variable is involved.
   (3) IPv6 nameservers are bracketed before going into `resolver` or nginx rejects the
   config outright — and resolv.conf does carry them on a tailnet host.
+  `ROUTER_VHOST_PWA_<NAME>="<app name>|<short name>[|<manifest path>]"` (+ an optional
+  `ROUTER_VHOST_PWA_ICON_<NAME>` naming a PNG inside the container) rewrites that app's own
+  PWA manifest, because two instances of the same app are otherwise indistinguishable once
+  installed — a personal Trilium and a project-scoped one both serve "Trilium Notes" and the
+  same icon, and the app has no setting for it since its manifest is a static file in its
+  client build, so the hop in front is the only place that can fix it. router-manager
+  **merges** rather than authors (`backend/internal/vhostpwa`, ungated
+  `GET /api/vhost-pwa/{name}/manifest`, the same shape as webmanager's own
+  `internal/manifestpatch`): the app's manifest is fetched and only the declared keys are
+  replaced, so `display_override`/`share_target`/anything else we don't know about survives
+  instead of being silently dropped by a hand-copied one. Ungated is required, not
+  convenient — an Android WebAPK is built by Google's servers, which carry no session; the
+  endpoint takes a vhost *name* and reads its upstream from the same `ROUTER_VHOST_` entry,
+  so it is not a fetch primitive. Failure is a bare 502 that nginx's `error_page` turns into
+  the app's own unmodified manifest, i.e. the PWA still installs, under the app's own name.
+  The replacement icon is published at a **fixed** `/_pwa-icon.png` on every such vhost
+  rather than at each app's own icon path, so the path an outer forward-auth has to leave
+  public is the same one every time; its `sizes` is read out of the PNG header rather than
+  declared, since a manifest whose sizes disagree with the file is dropped quietly.
   Both halves of the value are charset-checked before being pasted into the config (the
   config-generation-layer counterpart to `internal/targetguard`'s check on API-registered
   targets), and an upstream naming router itself

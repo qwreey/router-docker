@@ -271,6 +271,14 @@ vhost_resolver="$(awk '/^nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null 
 
 vhost_blocks=""
 for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
+    # ROUTER_VHOST_PWA_* / ROUTER_VHOST_PWA_ICON_* share this prefix but are
+    # read below as part of whichever entry they belong to, not as entries of
+    # their own - without this they'd each draw a "malformed entry" warning
+    # that reads exactly like a real misconfiguration.
+    case "$vhost_var" in
+        ROUTER_VHOST_PWA_*) continue ;;
+    esac
+
     vhost_value="${!vhost_var}"
     vhost_name="${vhost_var#ROUTER_VHOST_}"
     # An empty value is how a user turns one of these off without deleting
@@ -334,6 +342,75 @@ for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
         vhost_resolver_directive="resolver $vhost_resolver valid=10s ipv6=off;"
     fi
 
+    # ROUTER_VHOST_PWA_<NAME>="<app name>|<short name>[|<manifest path>]" -
+    # rewrites the app's own PWA manifest so a second instance of an app the
+    # user already has installed is tellable apart on the home screen (the
+    # concrete case: a personal Trilium and a project-scoped one both serving
+    # "Trilium Notes" and the same icon). The merge itself is router-manager's
+    # (backend/internal/vhostpwa); all this needs from the value is which path
+    # to intercept, since only the app knows that (/manifest.webmanifest for
+    # most, /manifest.json for code-server).
+    vhost_pwa_var="ROUTER_VHOST_PWA_${vhost_name}"
+    vhost_pwa_value="${!vhost_pwa_var:-}"
+    vhost_pwa_block=""
+    if [ -n "$vhost_pwa_value" ]; then
+        vhost_pwa_key="$(printf '%s' "$vhost_name" | tr 'A-Z_' 'a-z-')"
+        vhost_pwa_manifest="$(printf '%s' "$vhost_pwa_value" | awk -F'|' '{ print $3 }' | xargs)"
+        [ -n "$vhost_pwa_manifest" ] || vhost_pwa_manifest="/manifest.webmanifest"
+        vhost_pwa_icon_var="ROUTER_VHOST_PWA_ICON_${vhost_name}"
+        vhost_pwa_icon="${!vhost_pwa_icon_var:-}"
+
+        if ! [[ "$vhost_pwa_manifest" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+            echo "nginx-service: ROUTER_VHOST_PWA_${vhost_name} manifest path '$vhost_pwa_manifest' is not a plain path - not rewriting the manifest" >&2
+        else
+            vhost_pwa_icon_block=""
+            if [ -n "$vhost_pwa_icon" ]; then
+                # Checked here rather than left to fail at request time: a
+                # missing icon file otherwise shows up only as an app that
+                # installs with the wrong picture, with nothing said anywhere.
+                if ! [[ "$vhost_pwa_icon" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+                    echo "nginx-service: ROUTER_VHOST_PWA_ICON_${vhost_name} '$vhost_pwa_icon' is not a plain absolute path - ignoring the icon" >&2
+                elif [ ! -f "$vhost_pwa_icon" ]; then
+                    echo "nginx-service: ROUTER_VHOST_PWA_ICON_${vhost_name} points at '$vhost_pwa_icon', which does not exist in this container - ignoring the icon (mount it under ROUTER_VOLUME)" >&2
+                else
+                    vhost_pwa_icon_block="
+        # The replacement icon, at the fixed path the rewritten manifest
+        # points at. Must be reachable with no credentials for an Android
+        # install to work at all - the WebAPK is built by Google's servers,
+        # not the phone - so leave this path out of your outer proxy's auth
+        # the same way you already do for the manifest.
+        location = /_pwa-icon.png {
+            alias $vhost_pwa_icon;
+            default_type image/png;
+        }
+"
+                fi
+            fi
+            vhost_pwa_block="
+        # PWA manifest rewrite (ROUTER_VHOST_PWA_${vhost_name}).
+        location = $vhost_pwa_manifest {
+            proxy_intercept_errors on;
+            error_page 502 503 504 = @${vhost_pwa_key//-/_}_manifest_fallback;
+            proxy_pass http://unix:/run/router-manager.sock:/api/vhost-pwa/$vhost_pwa_key/manifest;
+            proxy_set_header Host \$host;
+        }
+
+        # Only reachable through the error_page above. If router-manager is
+        # down or the merge fails, the app's own manifest is served unchanged
+        # - the PWA still installs, just under the app's own name, instead of
+        # not installing at all.
+        location @${vhost_pwa_key//-/_}_manifest_fallback {
+            internal;
+            $vhost_resolver_directive
+            set \$vhost_upstream $vhost_upstream;
+            proxy_pass http://\$vhost_upstream;
+            proxy_set_header Host \$host;
+        }
+$vhost_pwa_icon_block"
+            echo "nginx-service: vhost $vhost_pwa_key rewrites its PWA manifest at $vhost_pwa_manifest" >&2
+        fi
+    fi
+
     echo "nginx-service: vhost${vhost_server_names} -> $vhost_upstream (from $vhost_var)" >&2
     vhost_blocks="$vhost_blocks
     server {
@@ -351,7 +428,7 @@ for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
         # live updates and accepts large attachments.
         client_max_body_size 0;
         proxy_read_timeout 3600s;
-
+$vhost_pwa_block
         location / {
             $vhost_resolver_directive
             # Through a variable (see vhost_resolver above), so a stopped
