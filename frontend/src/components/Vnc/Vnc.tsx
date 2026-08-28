@@ -7,7 +7,7 @@ import { Skeleton } from '../common/Skeleton'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { withViewTransition } from '../../utils/viewTransition'
 import { TargetDialog } from './TargetDialog'
-import { useViewerOrigin } from './useViewerOrigin'
+import { useViewerOrigin, useViewerOriginResolver } from './useViewerOrigin'
 import { useAuthStatus } from '../common/useAuthStatus'
 import './Vnc.css'
 
@@ -24,6 +24,13 @@ const RESIZE_LABEL: Record<string, string> = {
   scale: '맞춰 축소',
   off: '안 함',
 }
+
+// How long to let the handed-over embed's connection finish tearing down
+// before the new window connects in its place. Only the WebSocket close has
+// to land at router, which then drops the upstream TCP - well under this in
+// practice, but a blank window for a fraction of a second is a much cheaper
+// failure than two clients briefly sharing a target.
+const HANDOFF_DELAY_MS = 250
 
 // The viewer iframe's own document, or null when it can't be reached:
 // cross-origin (the webmanager embed against a dedicated
@@ -48,7 +55,17 @@ function isFullscreenActive(frame: HTMLIFrameElement | null): boolean {
 // switching targets remounts rather than reusing a connected session's
 // iframe (noVNC reconnects to whatever it was told at load time; mutating
 // src in place leaves its internal state half-torn-down).
-function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string; onClose: () => void }) {
+function Viewer({
+  info,
+  origin,
+  onClose,
+  onMoveToWindow,
+}: {
+  info: VncTargetInfo
+  origin: string
+  onClose: () => void
+  onMoveToWindow: () => void
+}) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
@@ -78,8 +95,8 @@ function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string
   function requestOwnFullscreen() {
     cardRef.current?.requestFullscreen?.().catch(() => {
       // Denied by policy (a missing allow= on some ancestor, most likely) -
-      // the 새 탭 button below is the working fallback, so there's nothing
-      // useful to say beyond not crashing.
+      // the "새 창으로 옮기기" button below is the working fallback, so
+      // there's nothing useful to say beyond not crashing.
     })
   }
 
@@ -138,9 +155,15 @@ function Viewer({ info, origin, onClose }: { info: VncTargetInfo; origin: string
               </>
             )}
           </button>
-          <a className="btn btn-small" href={src} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} aria-hidden="true" /> 새 탭
-          </a>
+          {/* Hands the session over rather than opening a second one: the
+              embed below is torn down first, and only then does the new
+              window connect. Two clients on one target fight over the
+              desktop size in `remote` resize mode - the embed keeps
+              resetting it to the iframe's size, so the new window would
+              never get to be as large as it actually is. */}
+          <button type="button" className="btn btn-small" onClick={onMoveToWindow}>
+            <ExternalLink size={14} aria-hidden="true" /> 새 창으로 옮기기
+          </button>
           <button type="button" className="btn btn-small" onClick={onClose}>
             닫기
           </button>
@@ -172,7 +195,12 @@ export function Vnc() {
   const [openName, setOpenName] = useState<string | null>(null)
 
   const openTarget = targets.find((t) => t.name === openName) ?? null
+  const resolveViewerOrigin = useViewerOriginResolver()
   const { origin: viewerOrigin, loading: originLoading } = useViewerOrigin(openTarget)
+  // A window opened by openInNewWindow that is deliberately still sitting on
+  // about:blank, waiting for the embedded viewer it is taking over from to
+  // be gone. See that function.
+  const pendingWindow = useRef<{ win: Window; url: string } | null>(null)
   // A BackendRFB viewer's WebSocket goes through router-manager's own
   // password gate, so a locked session gets a viewer that loads and then
   // silently fails to connect. Say so instead.
@@ -180,6 +208,52 @@ export function Vnc() {
   const lockedOut = Boolean(
     openTarget?.viewerOrigin === 'self' && authStatus?.required && !authStatus.unlocked,
   )
+
+  // Second half of the handoff: the embed has now been unmounted (effects
+  // run after the DOM commit), so its WebSocket is closing and router is
+  // dropping the upstream TCP connection with it. The short delay is for
+  // that teardown to actually reach the VNC server - reconnecting while the
+  // old client is still registered is the very thing this avoids.
+  useEffect(() => {
+    const pending = pendingWindow.current
+    if (!pending || openName !== null) return
+    pendingWindow.current = null
+    const timer = window.setTimeout(() => {
+      try {
+        pending.win.location.replace(pending.url)
+      } catch {
+        // The user closed the blank window before it got its URL. Nothing
+        // to recover; the target is still listed and still openable.
+      }
+    }, HANDOFF_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [openName])
+
+  // Open a target in its own window. When that target is the one currently
+  // embedded below, this is a *move*, not a second session: two clients on
+  // one target fight over the desktop size in `remote` resize mode, and the
+  // embed - being the smaller of the two - keeps winning, which is why a
+  // maximised new window used to stay stuck at the iframe's size.
+  //
+  // The window has to be opened synchronously here or the popup blocker
+  // eats it, so it is opened blank inside the click and navigated later,
+  // once the embed is actually gone (the effect above).
+  function openInNewWindow(info: VncTargetInfo) {
+    const { origin } = resolveViewerOrigin(info)
+    if (!origin) return
+    const win = window.open('about:blank', '_blank')
+    if (!win) {
+      setError('팝업이 차단되어 새 창을 열지 못했습니다 - 이 사이트의 팝업을 허용해주세요.')
+      return
+    }
+    const url = origin + info.viewerPath
+    if (openName === info.name) {
+      pendingWindow.current = { win, url }
+      setOpenName(null)
+      return
+    }
+    win.location.replace(url)
+  }
 
   const load = useCallback(async () => {
     try {
@@ -330,6 +404,21 @@ export function Vnc() {
                       >
                         {openName === info.name ? '닫기' : '보기'}
                       </button>{' '}
+                      {/* Deliberately available before anything is open: a
+                          full-size desktop is often the *only* way someone
+                          wants to look at a target, and making them open the
+                          embed first just to reach this button meant the
+                          window inherited a session that then fought it over
+                          the desktop size. */}
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        disabled={info.routeMissing}
+                        onClick={() => openInNewWindow(info)}
+                      >
+                        <ExternalLink size={14} aria-hidden="true" />{' '}
+                        {openName === info.name ? '새 창으로 옮기기' : '새 창'}
+                      </button>{' '}
                       <button
                         type="button"
                         className="btn btn-small"
@@ -404,6 +493,7 @@ export function Vnc() {
           info={openTarget}
           origin={viewerOrigin}
           onClose={() => setOpenName(null)}
+          onMoveToWindow={() => openInNewWindow(openTarget)}
         />
       )}
 

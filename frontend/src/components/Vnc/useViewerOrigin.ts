@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useAuthStatus } from '../common/useAuthStatus'
 import type { VncTargetInfo } from '../../api/types'
 
@@ -36,6 +36,15 @@ import type { VncTargetInfo } from '../../api/types'
 //     its own shell back.
 //  4. Otherwise the shared origin already is the current one.
 export function useViewerOrigin(info: VncTargetInfo | null): { origin: string | null; loading: boolean } {
+  return useViewerOriginResolver()(info)
+}
+
+// The same resolution, as a function that can be called for *any* target
+// rather than only the one currently open — the target list's "새 창" button
+// needs an origin for a row whose viewer was never mounted.
+export function useViewerOriginResolver(): (
+  info: VncTargetInfo | null,
+) => { origin: string | null; loading: boolean } {
   const { status } = useAuthStatus()
 
   const paramOrigin = useMemo(() => {
@@ -43,24 +52,29 @@ export function useViewerOrigin(info: VncTargetInfo | null): { origin: string | 
     return parseOrigin(raw)
   }, [])
 
-  // No target open: nothing to resolve, and reporting "loading" would leave
-  // the tab's own placeholder waiting on an answer it never needs.
-  if (!info) return { origin: null, loading: false }
-  if (info.viewerOrigin === 'self') return { origin: window.location.origin, loading: false }
+  return useCallback(
+    (info: VncTargetInfo | null) => {
+      // No target: nothing to resolve, and reporting "loading" would leave
+      // the tab's own placeholder waiting on an answer it never needs.
+      if (!info) return { origin: null, loading: false }
+      if (info.viewerOrigin === 'self') return { origin: window.location.origin, loading: false }
 
-  if (paramOrigin) return { origin: paramOrigin, loading: false }
-  // status===null only means the auth-status fetch is still in flight; we
-  // can't tell the dedicated-domain cases from the shared one until it
-  // lands, so report loading rather than guessing the current origin and
-  // flashing a viewer that then disappears.
-  if (!status) return { origin: null, loading: true }
-  if (status.trustedHosts.includes(status.requestHost)) {
-    // Re-parsed rather than trusted as-is even though the backend already
-    // normalized it (see handlers_auth.go's appOrigin) — this value ends up
-    // in an iframe src, and one validation per boundary is cheap.
-    return { origin: parseOrigin(status.appOrigin), loading: false }
-  }
-  return { origin: window.location.origin, loading: false }
+      if (paramOrigin) return { origin: paramOrigin, loading: false }
+      // status===null only means the auth-status fetch is still in flight; we
+      // can't tell the dedicated-domain cases from the shared one until it
+      // lands, so report loading rather than guessing the current origin and
+      // flashing a viewer that then disappears.
+      if (!status) return { origin: null, loading: true }
+      if (status.trustedHosts.includes(status.requestHost)) {
+        // Re-parsed rather than trusted as-is even though the backend already
+        // normalized it (see handlers_auth.go's appOrigin) — this value ends up
+        // in an iframe src, and one validation per boundary is cheap.
+        return { origin: parseOrigin(status.appOrigin), loading: false }
+      }
+      return { origin: window.location.origin, loading: false }
+    },
+    [paramOrigin, status],
+  )
 }
 
 // Never interpolate an origin that came in over the wire straight into an
