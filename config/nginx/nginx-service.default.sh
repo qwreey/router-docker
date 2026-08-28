@@ -234,7 +234,152 @@ else
     fi
 fi
 
+# ROUTER_VHOST_<NAME> (one env var per entry, value "<host>[,<host>...]=<upstream>")
+# - gives a container that isn't router's own SPA a whole hostname of its
+# own, the same shape ROUTER_MANAGER_HOSTS and TINYAUTH_HOSTS already give
+# router-manager and tinyauth: a plain server{} block selected by nginx's
+# server_name matching, so your outer reverse proxy points that hostname at
+# routerip:80 with no path rewrite, exactly like the other two.
+#
+# Why a scanned prefix rather than one comma-separated list: each entry is
+# declared by whichever side project needs it, in that project's own compose
+# overlay (`environment:` merged onto the code-docker-router service), so two
+# projects attached at once must not have to merge into one shared value.
+# One var each is additive by construction - the same reason netinit moved
+# from NETFILTER_FIX_EXTRA_INTERNAL_NETWORKS to per-network Docker labels.
+#
+# This is deliberately NOT Dev Proxy: Dev Proxy's own Host matching lives
+# inside caddy-adapter, which is only reachable through the /exports/ path
+# prefix (or a published CADDY_ADAPTER_PORT), so serving a side project at
+# the *root* of its own hostname through Dev Proxy needs a rewrite line in
+# your outer proxy. It also means no per-route tinyauth here - a vhost is
+# proxied straight through, and auth is your outer proxy's job (or move the
+# target to Dev Proxy if you want tinyauth's per-route "인증 요구" instead).
+# Docker's embedded DNS, read out of our own resolv.conf rather than
+# hardcoded as 127.0.0.11, since router rewrites that file itself when the
+# netgate is on. Needed because a vhost's upstream is another *container*:
+# with a literal `proxy_pass http://trilium:8080`, nginx resolves the name
+# once at startup and refuses to start at all when that container isn't up
+# yet - which would take router (the whole front door) down because a side
+# project was stopped. Passing the upstream through a variable defers
+# resolution to request time, and that form needs an explicit resolver.
+# IPv6 nameservers have to be bracketed in a `resolver` directive, or nginx
+# rejects the config outright - and resolv.conf does carry them (tailscale's
+# fd7a:115c:a1e0::53 sits next to 100.100.100.100 on a tailnet host).
+vhost_resolver="$(awk '/^nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null \
+    | awk '{ if (index($0, ":")) printf "[%s] ", $0; else printf "%s ", $0 }' | xargs || true)"
+
+vhost_blocks=""
+for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
+    vhost_value="${!vhost_var}"
+    vhost_name="${vhost_var#ROUTER_VHOST_}"
+    # An empty value is how a user turns one of these off without deleting
+    # the line (same convention as OOTB_GENERATE_SECRETS keys), so it is not
+    # an error - but say so, because a silent skip reads exactly like a
+    # working route that just doesn't work.
+    if [ -z "$vhost_value" ]; then
+        echo "nginx-service: $vhost_var is empty - skipping (that hostname will fall through to DEFAULT_UPSTREAM)" >&2
+        continue
+    fi
+    if [[ "$vhost_value" != *=* ]]; then
+        echo "nginx-service: $vhost_var must look like '<host>[,<host>...]=<upstream>[:port]', got '$vhost_value' - skipping" >&2
+        continue
+    fi
+    vhost_hosts="${vhost_value%%=*}"
+    vhost_upstream="${vhost_value#*=}"
+
+    # Both halves are pasted straight into an nginx config, so the charset
+    # check is what keeps a stray `;` or newline from becoming a directive.
+    # Same reasoning as backend/internal/targetguard's own charset check on
+    # Dev Proxy / App Routes targets, just at the config-generation layer.
+    if ! [[ "$vhost_upstream" =~ ^[A-Za-z0-9_.-]+(:[0-9]+)?$ ]]; then
+        echo "nginx-service: $vhost_var upstream '$vhost_upstream' is not a bare host[:port] - skipping" >&2
+        continue
+    fi
+    # Loopback is router's own inside: tinyauth (127.0.0.1:3000) and every
+    # unix socket live there, and nothing a side project legitimately wants
+    # to publish does. Refused for the same reason targetguard refuses it
+    # for API-registered targets - a public hostname pointed at router's own
+    # login service is a footgun, not a feature.
+    case "${vhost_upstream%%:*}" in
+        localhost|127.0.0.1|::1|router|forward)
+            echo "nginx-service: $vhost_var upstream '$vhost_upstream' points at router itself - refusing" >&2
+            continue
+            ;;
+    esac
+
+    vhost_server_names=""
+    vhost_bad=""
+    IFS=',' read -ra vhost_host_list <<< "$vhost_hosts"
+    for host in "${vhost_host_list[@]}"; do
+        host="$(echo "$host" | xargs)"
+        [ -n "$host" ] || continue
+        if ! [[ "$host" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
+            echo "nginx-service: $vhost_var hostname '$host' has characters that can't appear in a server_name - skipping this entry" >&2
+            vhost_bad=1
+            break
+        fi
+        vhost_server_names="$vhost_server_names $host"
+    done
+    [ -n "$vhost_bad" ] && continue
+    if [ -z "$vhost_server_names" ]; then
+        echo "nginx-service: $vhost_var has no hostname before the '=' - skipping" >&2
+        continue
+    fi
+
+    if [ -z "$vhost_resolver" ]; then
+        echo "nginx-service: no nameserver in /etc/resolv.conf - $vhost_var will fail to resolve '$vhost_upstream' at request time" >&2
+        vhost_resolver_directive=""
+    else
+        vhost_resolver_directive="resolver $vhost_resolver valid=10s ipv6=off;"
+    fi
+
+    echo "nginx-service: vhost${vhost_server_names} -> $vhost_upstream (from $vhost_var)" >&2
+    vhost_blocks="$vhost_blocks
+    server {
+        listen 80;
+        server_name$vhost_server_names;
+
+        if (\$code_docker_loopback_blocked) {
+            return 403 \"blocked: reached via tailscale's automatic loopback forwarding, not the published port - see NGINX_BLOCK_LOOPBACK in example-env\n\";
+        }
+
+        # Same two as the catch-all server block below: an upload cap of 0
+        # (unlimited - the app decides), and a read timeout long enough for
+        # an idle WebSocket. Both matter for a general-purpose app served
+        # here; Trilium, the first user of this, holds a WebSocket open for
+        # live updates and accepts large attachments.
+        client_max_body_size 0;
+        proxy_read_timeout 3600s;
+
+        location / {
+            $vhost_resolver_directive
+            # Through a variable (see vhost_resolver above), so a stopped
+            # side project is a 502 on its own hostname instead of an nginx
+            # that won't start. \$request_uri has to be spelled out because
+            # nginx can't infer the passed URI once proxy_pass holds a
+            # variable.
+            set \$vhost_upstream $vhost_upstream;
+            proxy_pass http://\$vhost_upstream\$request_uri;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection \"upgrade\";
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$router_forwarded_proto;
+            # A vhost target is a whole separate origin, so it never has a
+            # legitimate reason to see router-manager's admin unlock cookie
+            # - stripped here for the same reason /exports/ and /app/ strip
+            # it, even though a separate origin means the browser usually
+            # would not attach it in the first place.
+            proxy_set_header Cookie \$router_manager_cookie_stripped;
+        }
+    }"
+done
+export NGINX_VHOST_SERVER_BLOCKS="$vhost_blocks"
+
 generated_config=/run/nginx.generated.conf
-envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK}' < "$nginx_config" > "$generated_config"
+envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK} ${NGINX_VHOST_SERVER_BLOCKS}' < "$nginx_config" > "$generated_config"
 
 exec nginx -g "daemon off;" -c "$generated_config"

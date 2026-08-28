@@ -3,7 +3,7 @@
 `code-docker-router`는 code-docker의 네트워크 경계를 전담하는 별도 컨테이너입니다.
 `code-docker-internal`(사설, code-docker/dind가 붙는 망)과 `code-docker-external`(진짜
 인터넷으로 나가는 망) 양쪽에 다리를 걸친 유일한 컨테이너로, code-docker보다 신뢰
-수준이 높습니다. 여섯 가지 기능을 담당합니다:
+수준이 높습니다. 일곱 가지 기능을 담당합니다:
 
 1. **아웃바운드 격리(netgate)** — RFC1918/사설망 차단, DNS 레벨(dnsmasq) 콘텐츠
    블록리스트, 인바운드 포트포워딩, `tc` 기반 대역폭 하드 리밋(전체/서비스별, 네트워크
@@ -19,6 +19,9 @@
 6. **VNC** — 원격 데스크톱 대상을 브라우저에서 바로 봅니다. 기본 `rfb` 백엔드는
    router-manager 자신이 noVNC를 서비스하고 대상의 RFB 포트를 WebSocket으로
    중계합니다(별도 프로세스 없음). 자세한 내용은 [vnc.md](vnc.md).
+7. **vhost** — 붙인 사이드 프로젝트의 컨테이너에게 호스트네임 하나를 통째로 줍니다
+   (`ROUTER_VHOST_*`). 경로 프리픽스 밑에서 못 도는 앱, 또는 code-server와 origin을
+   공유하면 안 되는 앱을 위한 경로입니다. 자세한 내용은 [vhost.md](vhost.md).
 
 이렇게 한데 모은 이유(신뢰 경계가 code-docker보다 명확한 지점에 네트워크 관련 정책을
 집중시킨다는 설계)는

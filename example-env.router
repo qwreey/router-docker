@@ -38,7 +38,7 @@
 #. 아니라 `#`만 쓰세요.
 
 #!important
-ROUTER_ENV_VERSION=7
+ROUTER_ENV_VERSION=8
 #. ^ 마이그레이션 도구가 관리하는 값입니다. 직접 수정하지 마세요 - 고쳐도
 #. 다음 `--env-migrate` 실행 시 이 이미지가 기대하는 값으로 되돌아갑니다.
 
@@ -243,6 +243,30 @@ ROUTER_ENV_VERSION=7
 #. 쓰면(ROUTER_MANAGER_HOSTS가 비어있으면) 설정할 필요가 없습니다 - 그때는
 #. SPA가 열려 있는 origin이 곧 /app/ 을 서비스합니다.
 #ROUTER_APP_ORIGIN= # 예: https://code.yaeji.moe
+
+#. --- 사이드 프로젝트에 도메인 하나 통째로 주기 (ROUTER_VHOST_*) ---
+#. 붙인 사이드 프로젝트의 컨테이너를 그 자신의 호스트네임 루트에서
+#. 서비스합니다. ROUTER_MANAGER_HOSTS/TINYAUTH_HOSTS와 같은 모양이라,
+#. 바깥 리버스 프록시는 그 도메인을 routerip:80으로 그냥 넘기면 됩니다
+#. (path rewrite 불필요).
+#.
+#. 값 형식: "<host>[,<host>...]=<upstream>[:port]"
+#. 키 이름은 ROUTER_VHOST_ 로 시작하기만 하면 뒷부분은 자유입니다 - 항목마다
+#. 키를 따로 두는 이유는, 이 값을 보통 사이드 프로젝트 자신의 compose
+#. 오버레이가 code-docker-router 서비스의 environment에 얹어서 선언하기
+#. 때문입니다. 하나의 콤마 목록을 여럿이 나눠 쓰면 두 프로젝트를 동시에
+#. 붙일 수 없습니다.
+#.
+#. 언제 이걸 쓰고, 언제 App Routes/Dev Proxy를 쓰나 - docs/vhost.md 참고.
+#. 요약하면: 앱이 자기 origin을 가져야 할 때(경로 프리픽스 밑에서 못 돌거나,
+#. code-server/webmanager와 origin을 공유하면 그 앱 안에서 도는 것이
+#. webmanager API에 same-origin으로 닿게 되는 게 문제일 때) 이걸 씁니다.
+#. 여기에는 tinyauth 경로별 "인증 요구"가 없습니다 - 인증은 바깥 프록시의
+#. 몫이고, 경로별로 나누고 싶으면 Dev Proxy를 쓰세요.
+#.
+#. upstream이 router 자신(localhost/127.0.0.1/::1/router/forward)이면
+#. 거부합니다. 값을 비워두면 그 항목은 꺼지고 그 사실이 로그에 남습니다.
+#ROUTER_VHOST_TRILIUM= # 예: note.code.yaeji.moe=trilium:8080
 
 #. --- 잘 안 건드리는 값들 ---
 #. router-manager 자신은 기본적으로 TCP 포트를 전혀 열지 않고 유닉스 소켓

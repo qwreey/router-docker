@@ -40,7 +40,7 @@ Carries its own `envmigrate` submodule (`envmigrate/`,
 The netgate→router migration described in `functional-router-plan.md` is
 complete (see `plan.md`) — every feature area it envisioned lives here now.
 See "Feature areas (detailed)" below for the full breakdown (netgate,
-tailscale, Dev Proxy, App Routes, tinyauth, router-manager's API, DNS
+tailscale, Dev Proxy, App Routes, vhost, tinyauth, router-manager's API, DNS
 management, this repo's own frontend, router-manager's own admin-API auth).
 
 ## Ground rules
@@ -60,15 +60,15 @@ management, this repo's own frontend, router-manager's own admin-API auth).
 ## Feature areas (detailed)
 
 User-facing docs: `docs/router.md`, `docs/egress-netgate.md`, `docs/dev-proxy.md`,
-`docs/app-routes.md`, `docs/vnc.md`, `docs/tailscale.md` (now a short pointer into
-`docs/router.md`).
+`docs/app-routes.md`, `docs/vhost.md`, `docs/vnc.md`, `docs/tailscale.md` (now a short
+pointer into `docs/router.md`).
 
-Five feature areas. The first four each own supervisord programs (`config/supervisord.d/*.conf`,
+Six feature areas. The first four each own supervisord programs (`config/supervisord.d/*.conf`,
 git-tracked built-in program definitions — see `config/netgate/supervisord.default.conf`'s
 own comment on the two `[include]` globs, one git-tracked for built-ins, one gitignored for
 user overrides, same auto-include idiom as the main image's `config/supervisord.default.conf`);
-the fifth (VNC) runs no process of its own at all — it's router-manager plus an App
-Routes fragment, see its own bullet below:
+the last two run no process of their own at all — VNC is router-manager plus an App Routes
+fragment, and vhost is a few generated nginx `server{}` blocks; see their own bullets below:
 
 - **netgate (egress lockdown)** — netinit-style routing enforcement (code-docker/dind side)
   plus router's own filtering (DNS-level content blocklist via dnsmasq, RFC1918/CIDR
@@ -323,6 +323,48 @@ Routes fragment, see its own bullet below:
   `document.fullscreenElement` *inside* the frame, so noVNC's own button stayed stale and
   took two presses to escape. The cross-origin fallback fullscreens the whole viewer card
   (not the bare iframe) so the header's own exit button stays on screen.
+- **vhost** (`ROUTER_VHOST_<NAME>="<host>[,<host>...]=<upstream>[:port]"`,
+  `config/nginx/nginx-service.default.sh`, docs `docs/vhost.md`) — the third way to expose
+  something, alongside App Routes (`/app/<name>/` on the shared hostname) and Dev Proxy
+  (Host-matched inside caddy-adapter, reached through `/exports/`). A plain generated
+  `server{}` block, the same shape `ROUTER_MANAGER_HOSTS`/`TINYAUTH_HOSTS` already produce
+  for router-manager and tinyauth — which is exactly the point: an outer reverse proxy
+  points that hostname at `routerip:80` with **no path rewrite**, the way it already does
+  for those two, whereas serving a side project at the root of its own hostname through Dev
+  Proxy needs a `rewrite * /exports{uri}` line out there (or a published
+  `CADDY_ADAPTER_PORT`).
+  Reach for it when the app must own an origin: it can't live under a path prefix (no
+  base-path setting, root-absolute assets — tinyauth itself is the in-repo example), or
+  sharing code-server's origin would hand whatever runs inside that app same-origin reach
+  into webmanager's terminal/file APIs. That second one is why code-docker-trilium, the
+  first consumer, uses this instead of an App Route: Trilium `eval()`s note-authored
+  JavaScript with `contentSecurityPolicy: false`, and its notes get written by an agent
+  over MCP.
+  **One env var per entry, scanned by prefix**, not one shared comma-separated list — each
+  entry is normally declared by a side project's own compose overlay (`environment:` merged
+  onto the `code-docker-router` service), so two projects attached at once must not have to
+  merge into one value; same coupling inversion as netinit's move from
+  `NETFILTER_FIX_EXTRA_INTERNAL_NETWORKS` to per-network Docker labels.
+  No per-route auth here — a vhost is proxied straight through and auth is the outer
+  proxy's job; per-path public/gated splits are Dev Proxy's `handle`-mode route ordering
+  (narrow first), which is also how a PWA's manifest/icon paths get opened without opening
+  the app.
+  Three details that are load-bearing rather than stylistic: (1) the upstream is passed
+  through an nginx **variable** plus a `resolver` read out of `/etc/resolv.conf` at
+  generation time, because a literal `proxy_pass http://trilium:8080` is resolved once at
+  startup and makes nginx **refuse to start** when that container is down — which would
+  take router, the whole front door, down because a side project was stopped; with the
+  variable it's a 502 on that one hostname. (2) `$request_uri` is spelled out in the
+  `proxy_pass`, since nginx can't infer the passed URI once a variable is involved.
+  (3) IPv6 nameservers are bracketed before going into `resolver` or nginx rejects the
+  config outright — and resolv.conf does carry them on a tailnet host.
+  Both halves of the value are charset-checked before being pasted into the config (the
+  config-generation-layer counterpart to `internal/targetguard`'s check on API-registered
+  targets), and an upstream naming router itself
+  (`localhost`/`127.0.0.1`/`::1`/`router`/`forward`) is refused for the same reason
+  targetguard refuses it. An empty value switches one off and **says so** rather than
+  vanishing.
+
 - **tinyauth** — router's own forward-auth, run as a plain supervisord program inside
   router itself (`config/tinyauth/tinyauth.default.sh`), not a separate compose
   service — `Dockerfile` multi-stage-extracts the prebuilt binary straight from
