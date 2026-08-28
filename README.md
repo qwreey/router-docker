@@ -2,7 +2,8 @@
 
 The network-boundary container for [code-docker](https://github.com/qwreey/code-docker) —
 egress lockdown (DNS-level content blocklist, RFC1918/CIDR filtering), tailscale
-(forwards/publish), a Dev Proxy + App Routes reverse proxy, tinyauth forward-auth, and a
+(forwards/publish), a Dev Proxy + App Routes reverse proxy, tinyauth forward-auth, a
+browser VNC viewer (noVNC served by router itself, bridging the target's RFB port), and a
 router-manager admin API/SPA (`/router/`) covering all of it.
 
 Brought into code-docker as a git submodule at `router/`, with its own

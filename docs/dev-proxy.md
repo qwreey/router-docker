@@ -4,7 +4,7 @@
 내부 Caddy 인스턴스(`caddy-adapter` 프로그램)가 **router** 컨테이너에서 떠서
 항목(expose)별로 code-docker 안 로컬 포트로 리버스 프록시하고(자세한 배경은
 [router.md](router.md) 참고 — code-docker보다 신뢰 수준이 높은 국경 컨테이너에 네트워크
-관련 기능을 모으는 설계입니다), [webmanager의 Dev Proxy 탭](webmanager.md)에서
+관련 기능을 모으는 설계입니다), [webmanager의 Dev Proxy 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md)에서
 관리합니다(실제로는 router가 제공하는 페이지 컴포넌트를 webmanager가 그대로 가져와
 보여주는 것 — 탭 자체는 그대로입니다). 공유 base 도메인 같은 건 없습니다 — expose마다
 완전히 독립적인 전체 호스트네임을 직접 지정합니다 (`dev.example.com`,
@@ -30,7 +30,7 @@
 
 ## expose 추가하기
 
-[webmanager의 Dev Proxy 탭](webmanager.md)에서 먼저 이름(내부 식별자)과 host(외부에 노출할 전체 도메인, 예: `dev.example.com` — 라벨 하나만 와일드카드로 두고 싶으면 `*.staging.example.com`처럼 Caddy의 `host` matcher 와일드카드 문법을 그대로 쓸 수 있습니다)로 expose를 하나 만들고, 그 아래에 라우트를 원하는 만큼 추가하는 두 단계 구조입니다. "이름"은 파일명(`managed/<이름>.caddy`)과 Caddyfile `@이름` matcher 토큰으로만 쓰이는 내부 식별자라 점(`.`)을 포함할 수 없습니다 — 실제 노출 도메인은 항상 host 필드에 입력하세요. 이름과 host 둘 다 expose를 펼친 화면에서 나중에 바꿀 수 있습니다(각자 인라인 편집) — 이름을 바꾸면 파일도 새 이름으로 다시 쓰고 검증까지 통과한 뒤에만 옛 파일을 지우므로 중간에 실패해도 expose가 사라지지 않고, 이미 쓰이는 이름으로 바꾸려 하면 거부됩니다. 라우트 하나는:
+[webmanager의 Dev Proxy 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md)에서 먼저 이름(내부 식별자)과 host(외부에 노출할 전체 도메인, 예: `dev.example.com` — 라벨 하나만 와일드카드로 두고 싶으면 `*.staging.example.com`처럼 Caddy의 `host` matcher 와일드카드 문법을 그대로 쓸 수 있습니다)로 expose를 하나 만들고, 그 아래에 라우트를 원하는 만큼 추가하는 두 단계 구조입니다. "이름"은 파일명(`managed/<이름>.caddy`)과 Caddyfile `@이름` matcher 토큰으로만 쓰이는 내부 식별자라 점(`.`)을 포함할 수 없습니다 — 실제 노출 도메인은 항상 host 필드에 입력하세요. 이름과 host 둘 다 expose를 펼친 화면에서 나중에 바꿀 수 있습니다(각자 인라인 편집) — 이름을 바꾸면 파일도 새 이름으로 다시 쓰고 검증까지 통과한 뒤에만 옛 파일을 지우므로 중간에 실패해도 expose가 사라지지 않고, 이미 쓰이는 이름으로 바꾸려 하면 거부됩니다. 라우트 하나는:
 
 - **라우팅 대상 path** — 예: `/api/*`. 비우면 전체 요청에 매치됩니다.
 - **target** (`host:port`) — 리버스 프록시 대상. router 컨테이너 기준으로 reachable해야 합니다 — `127.0.0.1`/`localhost`는 router 자기 자신을 가리켜 code-docker 안 dev 서버에 닿지 않습니다. `code-docker:포트`처럼 compose 서비스 호스트네임을 쓰세요. 기본적으로 `code-docker`/`dind` 두 compose 서비스 호스트네임만 허용되고 그 외 대상은 거부됩니다(Caddy 자신의 admin API 등을 겨냥한 self-SSRF 방지) — `DEVPROXY_ALLOW_EXTERNAL_TARGETS="true"`로 제한을 통째로 풀거나, `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`(`.env.router`)로 특정 호스트만(예: `EXTRA_INCLUDE`로 붙는 sibling 프로젝트의 alias) 허용 목록에 추가할 수 있습니다 — router 자기 자신(`127.0.0.1`/`localhost`/`::1`/`router`)과 tailscale forwards의 `forward` 별칭([tailscale 절](router.md#tailscale) 참고 — 이것도 router 자신을 가리키는 alias)은 어느 쪽 옵트아웃으로도 절대 허용되지 않습니다.
@@ -176,5 +176,5 @@ hostname을 씁니다 - 그래서 브라우저는 요청마다 router-manager의
 여기로 노출한(신뢰할 수 없을 수 있는) dev 서버가 그 헤더를 읽어서
 router-manager API를 대신 호출하는 일은 없습니다. 다만 이건 "노출된 서버가
 헤더를 읽는" 경로만 막는 것으로, 완전한 origin 격리는 아닙니다 -
-[router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인routermanagerhosts)을
+[router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인router_manager_hosts)을
 참고하세요.

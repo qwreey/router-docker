@@ -3,7 +3,7 @@
 `code-docker-router`는 code-docker의 네트워크 경계를 전담하는 별도 컨테이너입니다.
 `code-docker-internal`(사설, code-docker/dind가 붙는 망)과 `code-docker-external`(진짜
 인터넷으로 나가는 망) 양쪽에 다리를 걸친 유일한 컨테이너로, code-docker보다 신뢰
-수준이 높습니다. 다섯 가지 기능을 담당합니다:
+수준이 높습니다. 여섯 가지 기능을 담당합니다:
 
 1. **아웃바운드 격리(netgate)** — RFC1918/사설망 차단, DNS 레벨(dnsmasq) 콘텐츠
    블록리스트, 인바운드 포트포워딩, `tc` 기반 대역폭 하드 리밋(전체/서비스별, 네트워크
@@ -16,14 +16,17 @@
 4. **App Routes** — Host 헤더와 무관한 경로 기반(`/app/<이름>/...`) 리버스
    프록시. 자세한 내용은 [app-routes.md](app-routes.md).
 5. **tinyauth** — Dev Proxy/App Routes 개별 항목을 보호하는 가벼운 forward-auth.
+6. **VNC** — 원격 데스크톱 대상을 브라우저에서 바로 봅니다. 기본 `rfb` 백엔드는
+   router-manager 자신이 noVNC를 서비스하고 대상의 RFB 포트를 WebSocket으로
+   중계합니다(별도 프로세스 없음). 자세한 내용은 [vnc.md](vnc.md).
 
 이렇게 한데 모은 이유(신뢰 경계가 code-docker보다 명확한 지점에 네트워크 관련 정책을
 집중시킨다는 설계)는
 [`.claude/functional-router-plan.md`](../.claude/functional-router-plan.md)에
 정리되어 있습니다.
 
-tailscale/Dev Proxy/App Routes/DNS/Net 관리/tinyauth/설정(router-manager 자체 비밀번호
-설정)은 전부 webmanager의 해당 탭에서도 관리할 수 있고, `http://<host>/router/`를
+tailscale/Dev Proxy/App Routes/VNC/DNS/Net 관리/tinyauth/설정(router-manager 자체
+비밀번호 설정)은 전부 webmanager의 해당 탭에서도 관리할 수 있고, `http://<host>/router/`를
 직접 열면 webmanager 없이도 같은 화면을 쓸 수 있습니다 — 자세한 내용은 아래
 "router-manager" 절.
 
@@ -81,7 +84,7 @@ publish:
 ```
 
 - **forwards** — 다른 tailnet 기기의 포트를 가져옵니다. code-docker 안에서는 `forward`
-  hostname으로 접근하세요(예: [adb 연결](tips/adb.md)의 `ANDROID_ADB_SERVER_ADDRESS=forward`) —
+  hostname으로 접근하세요(예: [adb 연결](https://github.com/qwreey/code-docker/blob/HEAD/docs/tips/adb.md)의 `ANDROID_ADB_SERVER_ADDRESS=forward`) —
   이 alias는 이제 router를 가리킵니다(예전엔 code-docker 자신).
 - **publish** — `target_host`로 지정한 컨테이너의 로컬 포트를 tailscale IP에 게시합니다.
   `local_port`는 router 자신이 아니라 **`target_host`**의 포트를 가리킵니다(router의
@@ -166,7 +169,11 @@ Dev Proxy/App Routes/`novnc` 백엔드 VNC 대상은 전부 접속 불가가 됩
 먼저 의심할 곳입니다. `TINYAUTH_APPURL`은 설정되어
 있는데 `TINYAUTH_HOSTS`가 비어 있으면 router의 nginx가 시작 시 경고를 남깁니다.
 이 호스트네임도 DNS 레코드와 바깥 리버스 프록시 등록이 필요합니다 — router가
-서비스하는 다른 hostname들과 동일합니다.
+서비스하는 다른 hostname들과 동일합니다(사이트 블록 예시, 부모 도메인을 어떻게
+고르는지, 바깥 프록시가 `X-Forwarded-Proto`를 넘겨야 하는 이유는
+[security-login.md의 "여러 서브도메인 한 번에 로그인
+(SSO)"](https://github.com/qwreey/code-docker/blob/HEAD/docs/security-login.md#여러-서브도메인-한-번에-로그인-sso--router_manager_hosts--tinyauth_hosts)
+참고).
 
 `TINYAUTH_APPURL`은 비워두면 `TINYAUTH_HOSTS`의 첫 호스트로
 `https://<host>`를 자동으로 만들어 씁니다 — 실제 배포에서 둘은 같은
@@ -213,7 +220,7 @@ router 자신의 nginx가 host:80을 직접 종단해 `/router/` 위치 하나�
 개발용으로만 쓰는 opt-in 예외). 같은 소켓이 API와 함께 `frontend`로
 빌드된 SPA도 서빙하므로(`backend/static.go`), `http://<host>/router/`를
 직접 열면 webmanager 없이도 아래 기능을 전부 UI로 쓸 수 있습니다(Dev Proxy/App
-Routes/Tailscale/DNS/Net 관리/tinyauth 탭은 webmanager가 가져다 쓰는 것과 정확히
+Routes/VNC/Tailscale/DNS/Net 관리/tinyauth 탭은 webmanager가 가져다 쓰는 것과 정확히
 같은 컴포넌트 — router-manager 자체 비밀번호를 다루는 "설정" 탭만 `/router/`
 SPA에만 있습니다).
 아래 API 경로는 router-manager 자신 기준이고, 실제로는 router의 nginx가 그대로
@@ -227,10 +234,10 @@ SPA에만 있습니다).
   (backendState/authUrl만 노출하는 저위험 읽기전용 상태)도 그대로 남아 있고,
   code-server 화면의 로그인 배너가 여기서 읽습니다.
 - Dev Proxy expose CRUD(`/api/dev-proxy/*`) — webmanager의
-  [Dev Proxy 탭](webmanager.md#dev-proxy)과 `/router/` SPA의 Dev Proxy 탭이 여기로
+  [Dev Proxy 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md#dev-proxy)과 `/router/` SPA의 Dev Proxy 탭이 여기로
   요청을 보냅니다.
 - App Routes 앱 CRUD(`/api/app-routes/*`) — webmanager의
-  [App Routes 탭](webmanager.md#app-routes)과 `/router/` SPA의 App Routes 탭이
+  [App Routes 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md#app-routes)과 `/router/` SPA의 App Routes 탭이
   여기로 요청을 보냅니다.
 - tinyauth 사용자 CRUD(`GET`/`POST /api/tinyauth/users`,
   `PUT /api/tinyauth/users/{name}/password`, `DELETE /api/tinyauth/users/{name}`) —
@@ -250,6 +257,11 @@ SPA에만 있습니다).
   `GET`/`PUT /api/netgate/bandwidth`) — webmanager와 `/router/` SPA 둘 다의 "Net 관리"
   탭이 여기로 요청을 보냅니다. 자세한 내용은
   [egress-netgate.md의 "설정 커스터마이징"](egress-netgate.md#설정-커스터마이징).
+- VNC 대상 CRUD(`GET /api/vnc/targets`, `POST /api/vnc/targets`,
+  `PUT`/`DELETE /api/vnc/targets/{name}`)와 `rfb` 백엔드의 RFB 브리지
+  (`GET /api/vnc/targets/{name}/ws`, WebSocket) — webmanager와 `/router/` SPA 둘 다의
+  "VNC" 탭이 여기로 요청을 보냅니다. 뷰어(noVNC) 자체도 router-manager가
+  `/router/novnc/`에서 직접 서비스합니다. 자세한 내용은 [vnc.md](vnc.md).
 - 자체 admin-API 비밀번호 게이트(`GET /api/auth/status`, `POST /api/auth/unlock`) —
   아래 "router-manager 자체 인증" 참고.
 
@@ -259,10 +271,18 @@ router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish의
 `POST`/`PUT`/`DELETE`, login의 `POST`, dev-proxy expose와 app-routes 앱의 `POST`/`PUT`/`DELETE`, tinyauth
 사용자 CRUD, DNS 블록리스트 소스/custom hosts/resolver의 `POST`/`PUT`/`DELETE`, netgate
 "Net 관리" 탭의 outbound/forwards `PUT`/`POST`/`DELETE`, 대역폭 제한
-`PUT /api/netgate/bandwidth`)는 비밀번호 게이트로
+`PUT /api/netgate/bandwidth`, VNC 대상의 `POST`/`PUT`/`DELETE`)는 비밀번호 게이트로
 보호할 수 있습니다. 읽기 라우트(state/config/list/status, DNS의 `/api/dns/query`
 포함)는 항상 열려 있습니다
 — webmanager 자체 게이트와 같은 "읽기는 열어두고 쓰기만 잠근다" 관례입니다.
+
+이 관례에 **딱 하나 예외**가 있습니다: `rfb` 백엔드의 RFB 브리지
+(`GET /api/vnc/targets/{name}/ws`)는 메서드가 `GET`이지만 게이트 뒤에 있습니다 —
+목록 조회가 아니라 원격 데스크톱에 실제로 연결하는 통로라, 여기를 열어두면
+비밀번호를 건너뛰고 화면·키보드·마우스를 그대로 넘겨주는 것과 같기 때문입니다
+(`rfb` 백엔드가 tinyauth의 "인증 요구"를 아예 거부하고 router-manager 자신의
+비밀번호로만 잠기는 것도 같은 이유입니다). VNC 탭이 갑자기 401을 뱉는다면
+여기를 보세요.
 webmanager와는 별도의 프로세스/비밀(argon2id 해시 + HMAC 서명 쿠키)이라서
 webmanager 자체 잠금과 독립적으로 켜고 끌 수 있고, 잠긴 쓰기 요청이 401을
 반환하면 webmanager UI가 자동으로 비밀번호 입력 모달을 띄우고 재시도합니다
@@ -271,7 +291,7 @@ webmanager 자체 잠금과 독립적으로 켜고 끌 수 있고, 잠긴 쓰기
 **권장: 앱 안에서 설정 (`/router/`)** — 아무것도 설정하지 않은 채 처음
 띄우면 `GET /api/auth/status`의 `source`가 `"unset"`입니다. 컨테이너의
 `http://<host>/router/`를 열면 router-manager가 직접 제공하는 SPA(webmanager
-없이도 접근 가능 — Dev Proxy/App Routes/Tailscale/DNS/Net 관리/tinyauth 사용자
+없이도 접근 가능 — Dev Proxy/App Routes/VNC/Tailscale/DNS/Net 관리/tinyauth 사용자
 관리까지 전부 이 안에서 되고, "설정" 탭이 기본으로 열립니다)가 뜨고, 그 탭에서 새
 비밀번호를 설정하면
 `${ROUTER_VOLUME:-./data/router}/auth-hash.json`(컨테이너 안에서는
@@ -332,7 +352,7 @@ router-manager에 직접 연결합니다(SPA + API 전부) — 그 도메인에�
 앞단 SSO(Authentik 등)로 code-server와 이 전용 도메인을 둘 다 보호하면서
 로그인을 한 번만 하고 싶다면 —
 [security-login.md의 "여러 서브도메인 한 번에 로그인
-(SSO)"](security-login.md#여러-서브도메인-한-번에-로그인-sso--router_manager_hosts-등)
+(SSO)"](https://github.com/qwreey/code-docker/blob/HEAD/docs/security-login.md#여러-서브도메인-한-번에-로그인-sso--router_manager_hosts--tinyauth_hosts)
 참고.
 
 전용 도메인은 일부러 router-manager 자신만 서비스하고 `/app/`은 서비스하지
@@ -350,10 +370,10 @@ origin에 두지 않는 것 자체가 이 격리의 목적입니다. VNC 탭의 
 없습니다(안 쓰는 경우는 SPA가 열려 있는 origin이 곧 `/app/`을 서비스합니다) —
 webmanager에 내장된 VNC 탭은 자신의 origin을 `?origin=`으로 직접 넘겨주므로
 이 값 없이도 이미 정상 동작합니다. 자세한 증상은
-[vnc.md의 관련 절](vnc.md#novnc-백엔드와-전용-관리-도메인routermanagerhosts)
+[vnc.md의 관련 절](vnc.md#novnc-백엔드와-전용-관리-도메인router_manager_hosts)
 참고.
 
-**webmanager에 내장된 Dev Proxy/App Routes/Tailscale/DNS/Net 관리/tinyauth 탭은 항상
+**webmanager에 내장된 Dev Proxy/App Routes/VNC/Tailscale/DNS/Net 관리/tinyauth 탭은 항상
 `<iframe>`으로 router의 `/router/` 페이지를 그대로 embed합니다**
 (`components/RouterEmbed/RouterFrame.tsx`, 2026-08-08부터 — 그 전에는
 `ROUTER_MANAGER_HOSTS` 미설정 시 `@code-docker/router-frontend` 컴포넌트를

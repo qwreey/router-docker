@@ -3,7 +3,8 @@
 code-docker 안에서 실행되는 AI 코딩 에이전트(Claude Code 등)가 프롬프트 인젝션이나
 버그로 인해 컨테이너 바깥(인터넷, 특히 같은 네트워크 위 공유기/NAS 같은 사설망 장비)에
 임의로 접근하지 못하게 막는 기능입니다. 전체 설계와 검토했다가 기각한 대안들은
-[`.claude/archive/egress-netgate-plan-done.md`](../.claude/archive/egress-netgate-plan-done.md)에
+code-docker 저장소의
+[`.claude/archive/egress-netgate-plan-done.md`](https://github.com/qwreey/code-docker/blob/HEAD/.claude/archive/egress-netgate-plan-done.md)에
 정리되어 있습니다. 이 기능은 지금 **router** 컨테이너 안 한 기능 영역으로 통합되어
 있습니다(`code-docker-router` 서비스, 예전 이름은 `code-docker-netgate`) — router의
 다른 역할(tailscale, Dev Proxy 등)은 [router.md](router.md)를 확인하세요. 이 문서
@@ -88,9 +89,11 @@ dind는 이미 privileged라 별도 에이전트 없이 자기 netns 안에서 �
   항목을 추가하면(다른 호스트 포트를 다른 `code-docker-internal` 컨테이너로 전달하고
   싶을 때) 그 포트포워딩용 ACCEPT 규칙은 항상 RFC1918 차단 규칙보다 **먼저** 적용됩니다 -
   대상 컨테이너의 IP 자체가 RFC1918 대역에 속하기 때문입니다.
-- code-docker/dind는 `/etc/resolv.conf`가 router를 가리키도록 설정되어 있고, router의
-  `dnsmasq`(`config/dns/`)가 이 DNS 쿼리를 받아 자기 자신의(정상 동작하는)
-  upstream으로 포워딩합니다. 같은 dnsmasq가 `addn-hosts=`로 StevenBlack/hosts 기반
+- code-docker와 dind의 DNS 쿼리는 결국 router의 `dnsmasq`(`config/dns/`)로 들어와,
+  router 자신의(정상 동작하는) upstream으로 포워딩됩니다. 다만 경로가 서로 다릅니다 —
+  dind는 `/etc/resolv.conf`가 router를 직접 가리키고, code-docker는 2026-08-27부터
+  자기 컨테이너 안의 `dns-local`(strict-order dnsmasq, `127.0.0.11` 다음 router 순으로
+  폴백)을 한 단계 거쳐서 옵니다. 같은 dnsmasq가 `addn-hosts=`로 StevenBlack/hosts 기반
   블록리스트 파일을 읽어, 리스트에 있는 도메인은 `0.0.0.0`으로 응답합니다 - DNS
   단계에서 이미 막히므로 어떤 TCP/TLS 연결도 시도되지 않습니다. (이전에는 squid의
   `REDIRECT`+`ssl_bump peek`로 HTTP(S) 트래픽을 가로채 `dstdomain`/SNI 기준으로
@@ -187,7 +190,7 @@ roblox-studio-docker의 `studio-netinit`, 한 번은 이 네트워크에 라벨�
 필요조차 없습니다 - 다음 주기에 그냥 새 `SandboxKey`를 읽어올 뿐입니다.
 `docker compose up -d --force-recreate <대상>` 후 수동 개입 없이 라우트가 돌아오는 것이
 이 설계의 회귀 테스트이고, 2026-08-25에 실측으로 통과를 확인했습니다(위
-`netinit-docker-plan.md`의 "실측 검증 결과" 절 참고).
+`.claude/archive/netinit-docker-plan-done.md`의 "실측 검증 결과" 절 참고).
 
 옛 사이드카 체제가 쓰던 자기 진단(로컬 netns에 loopback 외 인터페이스가 하나도 없으면
 고아 상태로 판단해 `exit 1`로 스스로 종료 → `restart: unless-stopped`가 재생성해서 새

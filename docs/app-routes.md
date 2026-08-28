@@ -26,7 +26,7 @@ Proxy](dev-proxy.md)가 도메인/Host로 분배하는 것과 정반대), 바깥
 이 nginx 설정은 다시 바뀔 필요가 없습니다(nginx가 깨지면 router-manager
 관리 UI 접근 자체가 막히므로, 앱마다 바뀌는 로직은 전부 Caddy 쪽으로
 넘기고 nginx는 최대한 고정해 둔 설계입니다). [webmanager의 App Routes
-탭](webmanager.md)에서 관리합니다(router가 제공하는 페이지 컴포넌트를
+탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md)에서 관리합니다(router가 제공하는 페이지 컴포넌트를
 webmanager가 그대로 가져와 보여주는 것 — Dev Proxy 탭과 같은 방식).
 
 ## 켜고 끄기
@@ -50,7 +50,7 @@ webmanager에 닿습니다(code-docker 자신의 내부 nginx가 `/` vs `/manage
 
 ## 앱 추가하기
 
-[webmanager의 App Routes 탭](webmanager.md)에서 이름과 target 두 값만
+[webmanager의 App Routes 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md)에서 이름과 target 두 값만
 입력하면 됩니다:
 
 - **이름** — `/app/<이름>/` 의 경로 세그먼트이자 내부 식별자입니다(파일명
@@ -66,7 +66,7 @@ webmanager에 닿습니다(code-docker 자신의 내부 nginx가 `/` vs `/manage
   self-SSRF 방지) — `APPROUTES_ALLOW_EXTERNAL_TARGETS="true"`로 제한을
   통째로 풀거나, `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`(`.env.router`)로
   특정 호스트만(예: `EXTRA_INCLUDE`로 붙는 sibling 프로젝트의 alias)
-  허용 목록에 추가할 수 있습니다 — router 자기 자신(`localhost`/`127.0.0.1`/`router`)과
+  허용 목록에 추가할 수 있습니다 — router 자기 자신(`localhost`/`127.0.0.1`/`::1`/`router`)과
   tailscale forwards의 `forward` 별칭([tailscale 절](router.md#tailscale)
   참고 — 이것도 router 자신을 가리키는 alias)은 이 옵트아웃으로도 절대
   허용되지 않습니다. Dev Proxy의 `DEVPROXY_ALLOW_EXTERNAL_TARGETS`와는 완전히
@@ -98,7 +98,7 @@ code.yaeji.moe {
 
 이 예시는 `code.yaeji.moe`로 들어오는 모든 요청 앞에 `/app/code`를 붙여
 router로 넘깁니다 — router의 Caddy가 `/app/code`를 벗기고 `code-docker:80`
-으로 전달하므로, 결과적으로 [security-login.md](security-login.md)의
+으로 전달하므로, 결과적으로 [security-login.md](https://github.com/qwreey/code-docker/blob/HEAD/docs/security-login.md)의
 기본 예시와 동일하게 동작합니다. App Routes가 진가를 발휘하는 경우는
 router가 내부 구조를 모르는 채로 여러 설정에 재사용될 때입니다 — 바깥
 프록시가 Host별로 다른 매칭 규칙을 새로 만들 필요 없이, 그냥 앱 이름만
@@ -191,5 +191,5 @@ router-manager의 잠금 해제 쿠키(`router_manager_unlock`)를 프록시 직
 헤더에서 잘라내므로(별도 설정 필요 없음, 자동), App Routes로 등록한 앱이 그
 헤더를 읽어서 router-manager API를 대신 호출하는 일은 없습니다. 다만 이건
 "등록된 앱이 헤더를 읽는" 경로만 막는 것으로, 완전한 origin 격리는 아닙니다
-- [router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인routermanagerhosts)을
+- [router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인router_manager_hosts)을
 참고하세요.

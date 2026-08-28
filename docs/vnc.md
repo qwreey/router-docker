@@ -221,7 +221,7 @@ RFB 브리지를 직접 서비스합니다. 그래서 `ROUTER_MANAGER_HOSTS`로 
 서비스하고 `/app/`은 서비스하지 않습니다 — 사용자가 등록한(즉 신뢰할 수 없는)
 앱 콘텐츠를 router-manager와 같은 origin에 두지 않기 위한 의도적인 설계이고,
 그 origin 격리가 이 기능의 존재 이유이기도 합니다([보안: 공유 origin과 전용
-도메인](router.md#보안-공유-origin과-전용-도메인routermanagerhosts) 참고).
+도메인](router.md#보안-공유-origin과-전용-도메인router_manager_hosts) 참고).
 
 그래서 전용 도메인을 **직접** 열어 VNC 탭에서 `novnc` 백엔드 대상을 보려고
 하면 뷰어 대신 안내 문구가 나옵니다. 실제 사용 경로 두 가지는 정상 동작합니다:
@@ -238,7 +238,7 @@ RFB 브리지를 직접 서비스합니다. 그래서 `ROUTER_MANAGER_HOSTS`로 
 그 origin에서 불러옵니다(iframe만 cross-origin이 되며, 그 분리 자체가 전용
 도메인이 존재하는 이유이므로 문제가 아닙니다). `rfb` 백엔드만 쓴다면
 `ROUTER_APP_ORIGIN`을 설정할 필요가 전혀 없습니다 — 자세한 내용은
-[router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인routermanagerhosts)
+[router.md의 관련 절](router.md#보안-공유-origin과-전용-도메인router_manager_hosts)
 참고.
 
 ## App Route가 어긋났을 때
