@@ -92,6 +92,18 @@ export interface VncTargetsResponse {
   backends: string[]
 }
 
+// Mirrors router/backend's GET /api/vnc/targets/{name}/clients (its
+// vncClientInfo). Only ever populated for a BackendRFB target - see that
+// handler's own comment. connectedAt is an RFC3339 string rather than a
+// number so it survives JSON round-tripping without a client-side clock
+// unit convention to agree on.
+export interface VncClientInfo {
+  id: number
+  remoteIp: string
+  userAgent: string
+  connectedAt: string
+}
+
 // Mirrors router/backend's GET /api/tailscale/state.
 export interface TailscaleState {
   backendState: string

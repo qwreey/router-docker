@@ -244,6 +244,70 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
     control is router-manager's own `authgate` rather than tinyauth — `validate` **refuses**
     `RequireAuth` on this backend instead of ignoring it, because a flag that silently does
     nothing would leave a target the user believes is gated wide open.
+
+    2026-09-06: `handleVncSocket` also keeps a package-level connection
+    registry (`vncConnsByTarget map[string]map[int64]*vncConn`, behind
+    `vncConnMu`, same idiom `internal/vnc`'s own package-level mutex uses) so
+    `GET`/`DELETE /api/vnc/targets/{name}/clients[/{id}]` can list and
+    disconnect the clients bridged through *this* process — the "어디서
+    켰는지 몰라서 혼란해짐" complaint in code-docker's own
+    `.claude/backlog/vnc-connected-clients.md`. It only ever sees
+    router-mediated connections: a native client dialing the target's raw
+    RFB port directly (e.g. through the Net 관리 tab's Forwards) never
+    touches this code path at all, so it's invisible and unkickable here —
+    the frontend panel says so.
+
+    Client IP is `realClientIP(r)`, **not** `clientKey(r)` (the peer-address
+    derivation `handlers_auth.go` already uses for authgate's own
+    rate-limiting) — `clientKey` is useless here because router-manager
+    normally listens on a unix socket (`main.go`'s `listen()`), so
+    `r.RemoteAddr` is the same unix-socket peer for every single caller.
+    `realClientIP` instead prefers `X-Real-IP`, then the first hop of
+    `X-Forwarded-For`, falling back to `clientKey(r)` only if neither header
+    is present. Trusting those headers is safe *specifically* because the
+    listener is unix-domain — nothing but router's own nginx can dial that
+    socket, and both nginx locations that proxy to it
+    (`config/nginx/nginx.default.conf`'s shared `/router/` and
+    `nginx-service.default.sh`'s dedicated `ROUTER_MANAGER_HOSTS` block, both
+    locations) now unconditionally set `X-Real-IP $remote_addr` +
+    `X-Forwarded-For $proxy_add_x_forwarded_for`, overwriting whatever a
+    client sent rather than passing it through — see `realClientIP`'s own
+    doc comment for exactly why that stops holding if `ROUTER_MANAGER_ADDR`
+    is ever pointed at a TCP address instead. `clientKey`'s own rate-limiting
+    has this identical unix-socket blind spot today (every caller shares one
+    lockout bucket) and is **deliberately not fixed here** — that's a
+    separate decision with its own trust tradeoffs, left as a documented gap
+    next to `realClientIP` rather than folded into this change.
+
+    Disconnecting isn't just `Close()` on the stored `net.Conn`: BackendRFB's
+    own `novncQuery` always sets `reconnect=1` (see `internal/vnc`), so the
+    still-open noVNC tab that just got kicked reconnects almost immediately
+    and the button would appear to do nothing. `handleDeleteVncClient`
+    therefore records a `vncKickWindow` (15s, package-level `vncKickUntil
+    map[vncKickKey]time.Time` behind `vncKickMu`, pruned lazily on every
+    check rather than on a timer) for that target+IP+User-Agent *before*
+    closing the conn, and `handleVncSocket` refuses a new connection
+    matching that same triple with a 403 until the window elapses — long
+    enough that noVNC's own reconnect backoff gives up mid-window, short
+    enough that a real network blip isn't mistaken for the kick for long.
+    User-Agent rides along with IP in `vncKickKey` because IP alone is
+    frequently shared by more than one browser (NAT, a shared office
+    egress) — keying on IP alone would kick everyone behind it, not just the
+    one client an operator picked. Two tabs of the *same* browser still get
+    kicked together (same IP, same User-Agent) — accepted rather than fixed,
+    since that's exactly the "two clients fighting over desktop size" case
+    the viewer's own "새 창으로 옮기기" handoff already treats as one unit.
+    This is explicitly a "turn the other viewer's screen off for a few
+    seconds", not a ban: the browser tab itself is never touched, and a
+    manual reload past the window reconnects normally. Frontend:
+    `frontend/src/components/Vnc/useVncClients.ts` (a new 5s poll, paused
+    via `document.visibilityState` — this tab had no existing polling loop
+    to join, unlike `useTailscaleEnabled.ts`'s) feeds a badge + expandable
+    per-client list (`VncClientsPanel.tsx`) in the target table's own new
+    "연결" column, "끊기" gated by the same `ConfirmDialog` the delete-target
+    flow already uses; its own honesty note also covers the IP column
+    reflecting whatever router's own nginx reported, which can itself be
+    wrong if something in front of router doesn't forward a real client IP.
   - `novnc`: the original shape — the target runs its own web VNC front end (`:6080`) and
     router reverse-proxies it through an App Routes fragment kept in lockstep with the
     registry (`/var/lib/code-docker-router/vnc/targets.json`), one action registering both.

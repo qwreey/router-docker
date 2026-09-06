@@ -165,6 +165,13 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection \$connection_upgrade;
+            # Same reasoning as nginx.default.conf's own /router/ location:
+            # router-manager only ever sees this unix socket's own peer
+            # address in r.RemoteAddr, so the VNC connected-clients panel
+            # (backend/handlers_vnc.go's realClientIP) needs these to see a
+            # real client IP at all.
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         }
 
         # The SPA itself (and its relative-pathed JS/CSS - see
@@ -177,6 +184,9 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection \"upgrade\";
             proxy_set_header Host \$host;
+            # See the /router/ location above.
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         }
     }"
     else

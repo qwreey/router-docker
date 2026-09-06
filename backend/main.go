@@ -156,6 +156,14 @@ func main() {
 	// rather than like a read - it hands out an interactive desktop, which
 	// is the most powerful thing this API does.
 	mux.Handle("GET /api/vnc/targets/{name}/ws", gate.RequirePassword(http.HandlerFunc(handleVncSocket)))
+	// The "누가 연결되어 있는지" panel (see .claude/backlog/vnc-connected-clients.md
+	// in code-docker's own repo): a read-only list plus a gated disconnect,
+	// same read/write split every other route above follows. Only ever
+	// non-empty for a BackendRFB target - handleListVncClients answers `[]`
+	// for anything else rather than a per-backend error, since "nobody's
+	// connected through here" is simply true for BackendNoVNC too.
+	mux.HandleFunc("GET /api/vnc/targets/{name}/clients", handleListVncClients)
+	mux.Handle("DELETE /api/vnc/targets/{name}/clients/{id}", gate.RequirePassword(http.HandlerFunc(handleDeleteVncClient)))
 
 	mux.HandleFunc("GET /api/tinyauth/users", handleListTinyauthUsers)
 	mux.Handle("POST /api/tinyauth/users", gate.RequirePassword(http.HandlerFunc(handleAddTinyauthUser)))

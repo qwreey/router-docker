@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minimize2, ExternalLink } from 'lucide-react'
 import { vncApi as api, errorMessage } from '../../api/client'
 import type { VncTarget, VncTargetInfo, VncTargetsResponse } from '../../api/types'
@@ -9,6 +9,8 @@ import { withViewTransition } from '../../utils/viewTransition'
 import { TargetDialog } from './TargetDialog'
 import { useViewerOrigin, useViewerOriginResolver } from './useViewerOrigin'
 import { useAuthStatus } from '../common/useAuthStatus'
+import { useVncClients } from './useVncClients'
+import { VncClientsBadge, VncClientsPanel } from './VncClientsPanel'
 import './Vnc.css'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -193,6 +195,11 @@ export function Vnc() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [openName, setOpenName] = useState<string | null>(null)
+  // Which target's "연결된 클라이언트" row is expanded, if any - at most one
+  // at a time, same single-open-thing pattern openName already uses for the
+  // viewer itself below.
+  const [expandedClients, setExpandedClients] = useState<string | null>(null)
+  const { clients: vncClients, refresh: refreshVncClients } = useVncClients(targets.map((t) => t.name))
 
   const openTarget = targets.find((t) => t.name === openName) ?? null
   const resolveViewerOrigin = useViewerOriginResolver()
@@ -291,6 +298,7 @@ export function Vnc() {
       // A rename moves the viewer's own path, so an open viewer for the old
       // name would keep pointing at a route that no longer exists.
       if (editing && openName === editing.name) setOpenName(target.name)
+      if (editing && expandedClients === editing.name) setExpandedClients(target.name)
       await load()
       showNotice('저장됨 (App Route도 함께 반영됨)')
     } catch (e) {
@@ -305,6 +313,7 @@ export function Vnc() {
     try {
       await api.del(`/targets/${encodeURIComponent(name)}`)
       if (openName === name) setOpenName(null)
+      if (expandedClients === name) setExpandedClients(null)
       await load()
       showNotice('삭제됨 (App Route도 함께 삭제됨)')
     } catch (e) {
@@ -359,12 +368,14 @@ export function Vnc() {
                   <th>백엔드</th>
                   <th>창 크기</th>
                   <th>인증</th>
+                  <th>연결</th>
                   <th aria-label="동작" className="table-actions-col" />
                 </tr>
               </thead>
               <tbody>
                 {targets.map((info) => (
-                  <tr key={info.name}>
+                  <Fragment key={info.name}>
+                    <tr>
                     <td>
                       <div className="vnc-name-cell">
                         <span>{info.label || info.name}</span>
@@ -394,6 +405,13 @@ export function Vnc() {
                         : info.requireAuth
                           ? 'tinyauth'
                           : '없음'}
+                    </td>
+                    <td>
+                      <VncClientsBadge
+                        count={vncClients[info.name]?.length ?? 0}
+                        expanded={expandedClients === info.name}
+                        onClick={() => setExpandedClients(expandedClients === info.name ? null : info.name)}
+                      />
                     </td>
                     <td className="table-actions-col">
                       <button
@@ -437,7 +455,19 @@ export function Vnc() {
                         삭제
                       </button>
                     </td>
-                  </tr>
+                    </tr>
+                    {expandedClients === info.name && (
+                      <tr className="vnc-clients-row">
+                        <td colSpan={7}>
+                          <VncClientsPanel
+                            name={info.name}
+                            clients={vncClients[info.name] ?? []}
+                            onChanged={refreshVncClients}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

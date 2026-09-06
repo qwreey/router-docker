@@ -32,6 +32,36 @@
   color: var(--danger, #d9534f);
 }
 
+/* The "연결" column's badge - a plain <button> styled like .badge so it
+   stays clickable (toggles the client list row below) without looking like
+   one of the row's other action buttons. */
+.vnc-clients-badge {
+  cursor: pointer;
+  gap: 0.3em;
+  border: none;
+  font: inherit;
+}
+
+.vnc-clients-badge svg {
+  flex-shrink: 0;
+}
+
+/* The expanded per-target client list row - a plain background tint so it
+   reads as "belongs to the row above" rather than a new table section. */
+.vnc-clients-row td {
+  background: var(--surface-muted, rgba(127, 127, 127, 0.06));
+}
+
+.vnc-clients-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vnc-clients-table {
+  font-size: 0.85rem;
+}
+
 /* The add button's own separator row - same spacing App Routes' and
    Tailscale's inline add forms get from .form-grid-inline (not reused
    directly: that class carries form-grid layout this single button has no
