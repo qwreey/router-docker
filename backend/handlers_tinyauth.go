@@ -18,9 +18,14 @@ import (
 )
 
 // tinyauthUserResponse is what the list endpoint returns - name only, the
-// hash never leaves this process.
+// hash never leaves this process. NeedsPassword marks a stored user whose
+// hash is missing on disk: every user created before tinyauthusers.User's
+// json tag was fixed is in that state, unable to log in and skipped by
+// RenderEnvFile. Reporting it is the point - a silently skipped user would
+// look like a working one that just rejects every password.
 type tinyauthUserResponse struct {
-	Name string `json:"name"`
+	Name          string `json:"name"`
+	NeedsPassword bool   `json:"needsPassword"`
 }
 
 type tinyauthUsersListResponse struct {
@@ -62,7 +67,7 @@ func handleListTinyauthUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]tinyauthUserResponse, len(users))
 	for i, u := range users {
-		resp[i] = tinyauthUserResponse{Name: u.Name}
+		resp[i] = tinyauthUserResponse{Name: u.Name, NeedsPassword: u.PasswordHash == ""}
 	}
 	writeJSON(w, http.StatusOK, tinyauthUsersListResponse{Pinned: tinyauthPinned(), Users: resp})
 }

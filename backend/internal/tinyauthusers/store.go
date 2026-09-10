@@ -61,11 +61,21 @@ func shellQuote(s string) string {
 // $2a$ hashes - see docs/router.md/router/example-env.router).
 const bcryptCost = 10
 
-// User is a single tinyauth credential. PasswordHash is never serialized to
-// JSON responses (see handlers_tinyauth.go) - only ever read/written here.
+// User is a single tinyauth credential, as persisted in StorePath.
+//
+// PasswordHash carries a real json tag on purpose: this struct is what
+// save()/load() marshal to disk, so `json:"-"` here does not mean "hidden
+// from API responses", it means the hash is never written at all - every
+// stored user then renders as a hash-less "name:" pair, which tinyauth
+// rejects with `failed to load users: invalid user format` and exits before
+// startsecs, surfacing as supervisord SPAWN_ERROR on the restart every
+// add/delete does (see handlers_tinyauth.go's applyTinyauthUsers). Keeping
+// the hash out of API responses is handlers_tinyauth.go's job instead - it
+// already answers with its own tinyauthUserResponse DTO and never marshals
+// this type.
 type User struct {
 	Name         string `json:"name"`
-	PasswordHash string `json:"-"`
+	PasswordHash string `json:"passwordHash"`
 }
 
 func load(path string) ([]User, error) {
@@ -193,6 +203,16 @@ func DeleteUser(path, name string) error {
 func RenderEnvFile(envPath string, users []User) error {
 	pairs := make([]string, 0, len(users))
 	for _, u := range users {
+		// Skip a user whose hash never made it to disk - every user stored
+		// before the User.PasswordHash json tag was fixed is in that state.
+		// Rendering it would produce a hash-less "name:" pair, which makes
+		// tinyauth reject the *whole* list ("invalid user format") and exit,
+		// i.e. one legacy row would lock out every working user too. Such a
+		// row isn't hidden: handlers_tinyauth.go reports it as
+		// needsPassword, and setting a password repairs it.
+		if u.PasswordHash == "" {
+			continue
+		}
 		pairs = append(pairs, u.Name+":"+u.PasswordHash)
 	}
 	// Single-quoted: a bcrypt hash's own `$2a$10$...` prefix is otherwise

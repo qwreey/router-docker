@@ -7,6 +7,11 @@ import { withViewTransition } from '../../utils/viewTransition'
 
 interface TinyauthUser {
   name: string
+  // Stored without a password hash - every user created before the
+  // tinyauthusers.User json-tag fix is in that state. Such a user can't log
+  // in and is skipped when tinyauth's own user list is rendered, so it has to
+  // say so rather than sit in the table looking like a working account.
+  needsPassword?: boolean
 }
 
 interface TinyauthUsersList {
@@ -37,6 +42,9 @@ export function TinyauthUsers() {
   const [changeError, setChangeError] = useState<string | null>(null)
   const [changing, setChanging] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  const brokenUsers = users.filter((u) => u.needsPassword).map((u) => u.name)
+  const usableUserCount = users.length - brokenUsers.length
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +101,9 @@ export function TinyauthUsers() {
       await tinyauthApi.put(`/users/${encodeURIComponent(changingPasswordFor)}/password`, { password: newPassword })
       setChangingPasswordFor(null)
       setNewPassword('')
+      // Reload: setting a password is also how a needsPassword user is
+      // repaired, so the badge has to go away without a manual refresh.
+      await load()
       showNotice()
     } catch (e) {
       setChangeError(errorMessage(e))
@@ -130,6 +141,12 @@ export function TinyauthUsers() {
           message="TINYAUTH_AUTH_USERS 환경변수로 고정되어 있습니다 - 여기서 바꿀 수 없습니다."
         />
       )}
+      {brokenUsers.length > 0 && (
+        <ErrorBanner
+          variant="warning"
+          message={`비밀번호가 저장되지 않은 사용자가 있습니다 (${brokenUsers.join(', ')}). 예전 버전의 버그로 해시가 디스크에 기록되지 않았습니다 - 로그인할 수 없고 tinyauth 설정에서도 제외됩니다. "비밀번호 변경"으로 새 비밀번호를 지정하면 복구됩니다.`}
+        />
+      )}
 
       {loading ? (
         <Skeleton />
@@ -147,7 +164,15 @@ export function TinyauthUsers() {
             <tbody>
               {users.map((u) => (
                 <tr key={u.name}>
-                  <td>{u.name}</td>
+                  <td>
+                    {u.name}
+                    {u.needsPassword && (
+                      <>
+                        {' '}
+                        <span className="badge badge-yellow">비밀번호 재설정 필요</span>
+                      </>
+                    )}
+                  </td>
                   {!pinned && (
                     <td className="table-actions-col">
                       <button
@@ -233,6 +258,13 @@ export function TinyauthUsers() {
         busy={deleting !== null}
       >
         &quot;{confirmDelete}&quot; 사용자를 삭제하시겠습니까?
+        {usableUserCount <= 1 && !users.find((u) => u.name === confirmDelete)?.needsPassword && (
+          <>
+            <br />
+            마지막 사용자입니다 - 삭제하면 로그인할 수 있는 사람이 없어져 tinyauth가 대기 상태로
+            들어갑니다 ("인증 필요"로 설정한 expose는 아무도 열 수 없게 됩니다).
+          </>
+        )}
       </ConfirmDialog>
     </div>
   )

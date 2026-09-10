@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"router/internal/supervisor"
 	"router/internal/tailscale"
@@ -31,7 +33,66 @@ func restartSupervisorProgram(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	return supervisorClient.StartProcess(ctx, name)
+	if err := supervisorClient.StartProcess(ctx, name); err != nil {
+		return withProgramLogTail(ctx, name, err)
+	}
+	return nil
+}
+
+// programLogTailBytes is how much of a failed program's log to look at - a
+// negative offset with a zero length is supervisord's own "tail the file"
+// form (see supervisor's readFile).
+const programLogTailBytes = 2000
+
+// withProgramLogTail explains a failed start with the program's own last
+// words. supervisord reports nothing but `SPAWN_ERROR: <name>`, which says
+// only "it died before startsecs" and never why; the actual reason is always
+// in the program's own stdout/stderr (every config/supervisord.d/*.conf
+// captures both under /var/log/<name>/). Without this the UI shows a bare
+// fault code and the message that identifies the problem - e.g. tinyauth's
+// own `failed to load users: invalid user format` - is only reachable by
+// docker exec'ing into the container, which is exactly how the tinyauth user
+// CRUD bug this was added for had to be diagnosed.
+func withProgramLogTail(ctx context.Context, name string, startErr error) error {
+	tails := make([]string, 0, 2)
+	for _, read := range []func(context.Context, string, int, int) (string, error){
+		supervisorClient.ReadProcessStderrLog,
+		supervisorClient.ReadProcessStdoutLog,
+	} {
+		out, err := read(ctx, name, -programLogTailBytes, 0)
+		if err != nil { // no log file configured/written yet - nothing to add
+			continue
+		}
+		if tail := lastLogLines(out, 3); tail != "" {
+			tails = append(tails, tail)
+		}
+	}
+	if len(tails) == 0 {
+		return startErr
+	}
+	return fmt.Errorf("%w (%s log: %s)", startErr, name, strings.Join(tails, " | "))
+}
+
+// lastLogLines flattens the last n non-empty lines of a log tail into one
+// line - this ends up inside a JSON error field a banner renders. Terminal
+// color is already gone by here (internal/supervisor's own sanitizeXML has
+// to strip it before the response can even be parsed).
+func lastLogLines(s string, n int) string {
+	lines := make([]string, 0, n)
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		// Drop blanks, and collapse a repeat of the line before it: a
+		// program supervisord retried three times says the same thing three
+		// times, which would fill the whole tail with one message.
+		if line == "" || (len(lines) > 0 && lines[len(lines)-1] == line) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " | ")
 }
 
 // restartTailscaleForward restarts the tailscale-forward program (see

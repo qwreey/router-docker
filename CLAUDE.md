@@ -513,6 +513,27 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   actually set (an infra-as-code pin, same priority as `ROUTER_MANAGER_AUTH_PASSWORD_HASH`
   vs its own file-backed store) — the UI shows a read-only notice instead of an edit form
   in that case.
+  **The whole per-user path was dead on arrival until 2026-09-10** and the two bugs behind
+  it are worth not reintroducing. `tinyauthusers.User.PasswordHash` carried `json:"-"`,
+  meaning to keep the hash out of API responses — but that struct is also what
+  `save()`/`load()` marshal *to disk*, so no hash was ever persisted; every user rendered
+  as a hash-less `name:` pair, tinyauth rejected the whole list with `failed to load
+  users: invalid user format` and exited before `startsecs`, and the add/delete request
+  that triggered the restart came back as `supervisor fault 50: SPAWN_ERROR: tinyauth`.
+  Responses were never at risk in the first place — `handlers_tinyauth.go` answers with
+  its own `tinyauthUserResponse` DTO and never marshals the store type. Users stored while
+  that was live keep a hash-less row: `RenderEnvFile` skips them (one bad entry otherwise
+  takes the working users down with it, since tinyauth rejects the list as a whole) and the
+  list endpoint reports them as `needsPassword` so the UI can offer the repair — a silent
+  skip would look like a working account that rejects every password. Second bug, same
+  symptom, different cause: with *zero* users tinyauth exits with `no authentication
+  providers configured`, so deleting the last one crash-looped it — `tinyauth.default.sh`
+  now idles (`exec sleep infinity`, same idiom as the `TINYAUTH_APPURL` check) when no
+  local user *and* no OAuth/LDAP/Tailscale provider is configured. The reason neither was
+  diagnosable from the UI: supervisord's `SPAWN_ERROR` says only "it died before
+  startsecs", so `restartSupervisorProgram` now appends the failed program's own log tail
+  (`withProgramLogTail` in `handlers_tailscale.go`) to every restart failure, for every
+  caller, not just tinyauth's.
 
 router-manager is this container's own Go backend (`backend/`, mirrors code-docker's own
 webmanager backend pattern) — this container's own nginx (not code-docker's) terminates host:80 directly and

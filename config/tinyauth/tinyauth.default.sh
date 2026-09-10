@@ -59,4 +59,23 @@ if [ -z "${TINYAUTH_AUTH_USERS:-}" ] && [ -e /var/lib/code-docker-router/tinyaut
     export TINYAUTH_AUTH_USERS
 fi
 
+# tinyauth exits on the spot ("failed to bootstrap app: no authentication
+# providers configured") when nothing at all can authenticate anyone - which
+# is exactly the state router-manager leaves behind the moment the last user
+# is deleted. Idle instead of crash-looping, same opt-out idiom as the
+# TINYAUTH_APPURL check above: the delete request that caused it would
+# otherwise come back as `supervisor fault 50: SPAWN_ERROR: tinyauth` for a
+# change that saved perfectly well. Adding a user restarts this program
+# anyway, so nothing else has to notice. Only the local-user path is ours to
+# reason about - any other provider being configured means tinyauth has its
+# own opinion about whether it can start, so stay out of the way.
+if [ -z "${TINYAUTH_AUTH_USERS:-}" ] \
+    && [ -z "${TINYAUTH_AUTH_USERSFILE:-}" ] \
+    && [ -z "${TINYAUTH_LDAP_ADDRESS:-}" ] \
+    && [ "${TINYAUTH_TAILSCALE_ENABLED:-false}" != "true" ] \
+    && ! env | grep -q '^TINYAUTH_OAUTH_PROVIDERS_'; then
+    echo "tinyauth: no users configured (and no OAuth/LDAP/Tailscale provider) - idling until one is added from router's own 설정 tab, or via TINYAUTH_AUTH_USERS"
+    exec sleep infinity
+fi
+
 exec /usr/local/bin/tinyauth
