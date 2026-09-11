@@ -32,7 +32,7 @@
 
 [webmanager의 Dev Proxy 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md)에서 먼저 이름(내부 식별자)과 host(외부에 노출할 전체 도메인, 예: `dev.example.com` — 라벨 하나만 와일드카드로 두고 싶으면 `*.staging.example.com`처럼 Caddy의 `host` matcher 와일드카드 문법을 그대로 쓸 수 있습니다)로 expose를 하나 만들고, 그 아래에 라우트를 원하는 만큼 추가하는 두 단계 구조입니다. "이름"은 파일명(`managed/<이름>.caddy`)과 Caddyfile `@이름` matcher 토큰으로만 쓰이는 내부 식별자라 점(`.`)을 포함할 수 없습니다 — 실제 노출 도메인은 항상 host 필드에 입력하세요. 이름과 host 둘 다 expose를 펼친 화면에서 나중에 바꿀 수 있습니다(각자 인라인 편집) — 이름을 바꾸면 파일도 새 이름으로 다시 쓰고 검증까지 통과한 뒤에만 옛 파일을 지우므로 중간에 실패해도 expose가 사라지지 않고, 이미 쓰이는 이름으로 바꾸려 하면 거부됩니다. 라우트 하나는:
 
-- **라우팅 대상 path** — 예: `/api/*`. 비우면 전체 요청에 매치됩니다.
+- **라우팅 대상 path** — 예: `/api/*`. 비우면 전체 요청에 매치됩니다. 여기도 위와 같은 exact-match 규칙이라 `/` 하나만 적으면 루트 경로만 매치되니, 전체를 받으려면 비워두거나 `/*`로 적으세요.
 - **target** (`host:port`) — 리버스 프록시 대상. router 컨테이너 기준으로 reachable해야 합니다 — `127.0.0.1`/`localhost`는 router 자기 자신을 가리켜 code-docker 안 dev 서버에 닿지 않습니다. `code-docker:포트`처럼 compose 서비스 호스트네임을 쓰세요. 기본적으로 `code-docker`/`dind` 두 compose 서비스 호스트네임만 허용되고 그 외 대상은 거부됩니다(Caddy 자신의 admin API 등을 겨냥한 self-SSRF 방지) — `DEVPROXY_ALLOW_EXTERNAL_TARGETS="true"`로 제한을 통째로 풀거나, `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`(`.env.router`)로 특정 호스트만(예: `EXTRA_INCLUDE`로 붙는 sibling 프로젝트의 alias) 허용 목록에 추가할 수 있습니다 — router 자기 자신(`127.0.0.1`/`localhost`/`::1`/`router`)과 tailscale forwards의 `forward` 별칭([tailscale 절](router.md#tailscale) 참고 — 이것도 router 자신을 가리키는 alias)은 어느 쪽 옵트아웃으로도 절대 허용되지 않습니다.
 - **strip prefix** (선택) — 요청 경로에서 이 리터럴 문자열을 잘라내고(`uri strip_prefix`) 전달합니다.
 - **리버스프록시 path** (선택) — strip 이후 남은 경로 앞에 이 문자열을 붙입니다(`rewrite * <값>{uri}`). 예를 들어 대상 path `/api/*`, strip `/api`, 리버스프록시 path `/v1/api`면 `/api/foo` 요청이 target에는 `/v1/api/foo`로 전달됩니다.
@@ -84,17 +84,25 @@ IP·포트입니다 — code-server/webmanager 요청도 router의 nginx를 거�
 
 ```caddyfile
 dev.example.com {
-	rewrite / /exports{uri}
+	rewrite /* /exports{uri}
 	reverse_proxy http://containerip:80
 }
 ```
+
+> **matcher는 `/*`여야 합니다 — `/`로 쓰면 루트 경로 하나만 rewrite됩니다.**
+> Caddy의 path matcher는 끝에 `*`가 없으면 정확히 일치(exact match)라,
+> `rewrite / /exports{uri}`는 `/` 요청만 `/exports/`로 바꾸고 `/@vite/client`,
+> `/node_modules/...` 같은 하위 리소스 요청은 손대지 않고 그냥 통과시킵니다. 그러면
+> 첫 HTML만 dev 서버에서 오고 나머지는 전부 catch-all(`DEFAULT_UPSTREAM`, 기본
+> `code-docker:80`)로 넘어가 code-server nginx의 404를 받습니다 — **"페이지는 뜨는데
+> js/css/HMR이 전부 404"라면 이걸 가장 먼저 확인하세요.**
 
 와일드카드 서브도메인 전체를 넘기고 싶다면(각 expose의 host를
 `이름.dev.example.com` 식으로 등록):
 
 ```caddyfile
 *.dev.example.com {
-	rewrite / /exports{uri}
+	rewrite /* /exports{uri}
 	reverse_proxy http://containerip:80
 }
 ```
