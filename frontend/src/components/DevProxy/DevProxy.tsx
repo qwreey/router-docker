@@ -388,7 +388,7 @@ export function DevProxy() {
             포트 80 하나만 열어두고 싶다면 위 방식으로 충분합니다. router가 포트를 하나 더 열어도 괜찮고 대신
             바깥 프록시의 rewrite를 아예 안 쓰고 싶다면, <code>CADDY_ADAPTER_PORT</code>(기본값 없음 — 설정
             필요)를 지정하고 퍼블리시하는 대안도 있습니다. 자세한 내용은{' '}
-            <a href="https://github.com/qwreey/code-docker/blob/master/docs/dev-proxy.md" target="_blank" rel="noreferrer">
+            <a href="https://github.com/qwreey/router-docker/blob/HEAD/docs/dev-proxy.md" target="_blank" rel="noreferrer">
               docs/dev-proxy.md
             </a>
             를 확인하세요.

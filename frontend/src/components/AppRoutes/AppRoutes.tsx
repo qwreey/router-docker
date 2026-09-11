@@ -297,7 +297,7 @@ export function AppRoutes() {
             바깥 리버스 프록시가 원하는 요청의 경로 앞에 <code>/app/&lt;이름&gt;</code>을 붙여 이 컨테이너(router)의
             80번 포트로 그대로 넘기면 됩니다. 최초 부팅 시 <code>code → code-docker:80</code> 앱이 자동으로
             생성되며, 지우거나 바꾸면 다시 생성되지 않습니다. 자세한 내용은{' '}
-            <a href="https://github.com/qwreey/code-docker/blob/master/docs/app-routes.md" target="_blank" rel="noreferrer">
+            <a href="https://github.com/qwreey/router-docker/blob/HEAD/docs/app-routes.md" target="_blank" rel="noreferrer">
               docs/app-routes.md
             </a>
             를 확인하세요.

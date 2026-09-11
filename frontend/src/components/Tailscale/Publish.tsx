@@ -91,7 +91,7 @@ export function Publish() {
           router에서 접근 가능한 아무 컴포즈 서비스 호스트명/IP나 지정할 수 있습니다(예: <code>code-docker</code>,{' '}
           <code>dind</code>). 자세한 내용은{' '}
           <a
-            href="https://github.com/qwreey/code-docker/blob/master/docs/router.md#tailscale"
+            href="https://github.com/qwreey/router-docker/blob/HEAD/docs/router.md#tailscale"
             target="_blank"
             rel="noreferrer"
           >
