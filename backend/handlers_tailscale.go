@@ -356,8 +356,17 @@ func handleDeleteTailscalePublish(w http.ResponseWriter, r *http.Request) {
 // `null` when Available is false, matching the read-only status contract
 // the frontend expects. Enabled reflects TAILSCALE_ENABLED (tailscale.
 // Enabled()) independent of Available, so a caller can tell "deliberately
-// turned off" apart from "on but daemon not ready/logged in yet" — both
-// frontends' sidebars use it to hide the Tailscale tab entirely when off.
+// turned off" apart from "on but daemon not ready/logged in yet".
+//
+// That Enabled bool is also on GET /api/tailscale/state, which is where the
+// sidebars read it from now — this route went behind the password gate in
+// the 2026-09-07 security review (it hands out the whole tailnet peer list),
+// and a background sidebar poll must not sit on a gated route. router's own
+// frontend/src/components/Tailscale/useTailscaleEnabled.ts was moved to
+// /state accordingly, and so was code-docker's webmanager copy of that hook
+// (webmanager/frontend/src/components/RouterEmbed/useTailscaleEnabled.ts) —
+// left on this route it would have swallowed the 401/503 into "enabled" and
+// kept webmanager's Tailscale tab visible even with TAILSCALE_ENABLED=false.
 type tailscaleStatusResponse struct {
 	Available bool              `json:"available"`
 	Enabled   bool              `json:"enabled"`
@@ -374,8 +383,11 @@ type tailscaleStatusResponse struct {
 // Short-circuits on TAILSCALE_ENABLED=false before touching GetStatus, same
 // as GetState already does — tailscaled was never started in that case, so
 // the exec would otherwise sit for up to GetStatus's own 5s timeout waiting
-// on a socket that's never going to answer, on every poll from either
-// frontend's sidebar (see useTailscaleEnabled.ts).
+// on a socket that's never going to answer, on every poll that reaches here.
+//
+// Behind gate.RequirePassword (see main.go) — the one GET besides the VNC
+// bridge that is, because the peer list it returns is a description of the
+// operator's private network, not a status flag.
 func handleTailscaleStatus(w http.ResponseWriter, r *http.Request) {
 	if !tailscale.Enabled() {
 		writeJSON(w, http.StatusOK, tailscaleStatusResponse{Available: false, Enabled: false})

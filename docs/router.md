@@ -231,7 +231,24 @@ router는 `router-manager`라는 Go 백엔드를 갖고 있습니다(webmanager�
 router 자신의 nginx가 host:80을 직접 종단해 `/router/` 위치 하나로 모든 API를
 유닉스 소켓(`/run/router-manager.sock`) 경유로 프록시합니다 — router-manager
 자신은 TCP 포트를 전혀 열지 않습니다(`ROUTER_MANAGER_ADDR`는 컨테이너 밖 로컬
-개발용으로만 쓰는 opt-in 예외). 같은 소켓이 API와 함께 `frontend`로
+개발용으로만 쓰는 opt-in 예외).
+
+> **`/router/`는 `code-docker-internal` 안에서는 닿지 않습니다.**
+> `/exports/`와 같은 `deny <internal-subnet>; allow all;`이 걸려 있습니다
+> (`ROUTER_NGINX_DENY_INTERNAL_MANAGER`, 기본 켜짐 — `ROUTER_MANAGER_HOSTS`
+> 전용 도메인 블록에도 같이 걸립니다. 그 블록은 Host 헤더로만 선택되므로
+> 한쪽만 막으면 `curl -H 'Host: router.example.com'` 한 줄로 우회됩니다).
+> 즉 code-docker나 dind 안에서 도는 프로세스(에이전트, npm postinstall 등)는
+> 이 관리 API를 부를 수 없습니다 — netgate egress 규칙을 고치는 API가
+> "그 안의 코드를 못 믿어서" 존재하는 울타리 자체이기 때문입니다.
+> webmanager의 Dev Proxy/App Routes/VNC/Tailscale/DNS/Net 관리 탭은 **브라우저**가
+> `<iframe>`으로 여는 것이고 webmanager 백엔드는 `/router/`를 서버측에서
+> 호출하지 않으므로, 이 검사에 걸리지 않습니다(요청은 바깥 리버스 프록시 →
+> router:80으로 들어옵니다). 정말로 내부에서 닿아야 하는 토폴로지라면
+> `ROUTER_NGINX_DENY_INTERNAL_MANAGER="false"`로 끌 수 있지만, 그러면
+> 비밀번호가 유일한 방어선이 됩니다.
+
+같은 소켓이 API와 함께 `frontend`로
 빌드된 SPA도 서빙하므로(`backend/static.go`), `http://<host>/router/`를
 직접 열면 webmanager 없이도 아래 기능을 전부 UI로 쓸 수 있습니다(Dev Proxy/App
 Routes/VNC/Tailscale/DNS/Net 관리/tinyauth 탭은 webmanager가 가져다 쓰는 것과 정확히
@@ -242,11 +259,13 @@ SPA에만 있습니다).
 
 - Tailscale 전체 CRUD — `GET`/`PUT /api/tailscale/config`(SOCKS 주소/재시도 간격),
   `GET`/`POST`/`PUT`/`DELETE /api/tailscale/forwards[/{name}]`, 같은 패턴의
-  `/api/tailscale/publish[/{name}]`, `GET /api/tailscale/status`(self/peer 정보),
+  `/api/tailscale/publish[/{name}]`, `GET /api/tailscale/status`(self/peer 정보 —
+  **읽기지만 비밀번호 게이트 뒤입니다**, 아래 "router-manager 자체 인증" 참고),
   `POST /api/tailscale/login/{start,cancel}`. webmanager의 Tailscale 탭과 `/router/`
   SPA의 Tailscale 탭이 여기로 요청을 보냅니다. 기존 `GET /api/tailscale/state`
-  (backendState/authUrl만 노출하는 저위험 읽기전용 상태)도 그대로 남아 있고,
-  code-server 화면의 로그인 배너가 여기서 읽습니다.
+  (backendState/authUrl + `enabled`만 노출하는 저위험 읽기전용 상태)도 그대로 남아
+  있고 게이트도 없습니다 — code-server 화면의 로그인 배너와 양쪽 사이드바의
+  "tailscale이 켜져 있나" 체크가 여기서 읽습니다.
 - Dev Proxy expose CRUD(`/api/dev-proxy/*`) — webmanager의
   [Dev Proxy 탭](https://github.com/qwreey/code-docker/blob/HEAD/docs/webmanager.md#dev-proxy)과 `/router/` SPA의 Dev Proxy 탭이 여기로
   요청을 보냅니다.
@@ -286,24 +305,59 @@ router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish의
 사용자 CRUD, DNS 블록리스트 소스/custom hosts/resolver의 `POST`/`PUT`/`DELETE`, netgate
 "Net 관리" 탭의 outbound/forwards `PUT`/`POST`/`DELETE`, 대역폭 제한
 `PUT /api/netgate/bandwidth`, VNC 대상의 `POST`/`PUT`/`DELETE`)는 비밀번호 게이트로
-보호할 수 있습니다. 읽기 라우트(state/config/list/status, DNS의 `/api/dns/query`
-포함)는 항상 열려 있습니다
-— webmanager 자체 게이트와 같은 "읽기는 열어두고 쓰기만 잠근다" 관례입니다.
+보호됩니다. 읽기 라우트(state/config/list, DNS의 `/api/dns/query` 포함)는 항상
+열려 있습니다 — webmanager 자체 게이트와 같은 "읽기는 열어두고 쓰기만 잠근다"
+관례입니다.
 
-이 관례에 **딱 하나 예외**가 있습니다: `rfb` 백엔드의 RFB 브리지
-(`GET /api/vnc/targets/{name}/ws`)는 메서드가 `GET`이지만 게이트 뒤에 있습니다 —
-목록 조회가 아니라 원격 데스크톱에 실제로 연결하는 통로라, 여기를 열어두면
-비밀번호를 건너뛰고 화면·키보드·마우스를 그대로 넘겨주는 것과 같기 때문입니다
-(`rfb` 백엔드가 tinyauth의 "인증 요구"를 아예 거부하고 router-manager 자신의
-비밀번호로만 잠기는 것도 같은 이유입니다). VNC 탭이 갑자기 401을 뱉는다면
-여기를 보세요.
+> **비밀번호는 더 이상 선택이 아닙니다(2026-09-07).** 예전에는 비밀번호가
+> 설정되지 않았으면 게이트가 요청을 **그냥 통과**시켰습니다 — 즉 기본 설치
+> 상태의 관리 API에는 자격증명이 아예 없었고, `/router/`에 닿을 수 있는 아무나
+> netgate 허용목록을 빈 배열로 덮어쓰거나 관리자 비밀번호를 먼저 선점할 수
+> 있었습니다. 지금은 fail-closed입니다: 비밀번호가 없으면 게이트 뒤의 모든
+> 라우트가 **503**
+> (`{"error":"router-manager password not configured - set ROUTER_MANAGER_AUTH_PASSWORD_HASH or use the setup dialog"}`)으로
+> 거부됩니다. 401이 아니라 503인 이유는, 401이면 프론트엔드가 "잠금 해제
+> 하세요" 모달을 띄우는데 아직 입력할 비밀번호 자체가 없기 때문입니다.
+> `GET /api/auth/status`와 `POST /api/auth/setup`은 게이트에 감싸여 있지
+> 않으므로 **첫 설정 흐름은 그대로 동작합니다** — `/router/`를 열어 "설정"
+> 탭에서 비밀번호를 정하면 그 순간부터 나머지가 살아납니다. 요약하면,
+> 비밀번호를 설정하지 않은 배포는 "안 잠긴 채 잘 돌아가는" 상태가 아니라
+> "Net 관리/DNS/tinyauth/Dev Proxy 쓰기가 전부 안 되는" 상태입니다.
+> `ootb.sh`와 `migrate.sh`는 그래서 빌드 직후 이 비밀번호를 기본 `y`로
+> 물어봅니다.
+
+이 관례에 **예외가 둘** 있습니다. 둘 다 메서드는 `GET`이지만 게이트 뒤입니다:
+
+- `rfb` 백엔드의 RFB 브리지(`GET /api/vnc/targets/{name}/ws`) — 목록 조회가
+  아니라 원격 데스크톱에 실제로 연결하는 통로라, 여기를 열어두면 비밀번호를
+  건너뛰고 화면·키보드·마우스를 그대로 넘겨주는 것과 같기 때문입니다
+  (`rfb` 백엔드가 tinyauth의 "인증 요구"를 아예 거부하고 router-manager 자신의
+  비밀번호로만 잠기는 것도 같은 이유입니다). VNC 탭이 갑자기 401을 뱉는다면
+  여기를 보세요.
+- `GET /api/tailscale/status` — `tailscale status --json`을 그대로 돌려주므로
+  태일넷의 모든 피어 호스트명·IP·태그·온라인 여부, 즉 사설망 지도 전체가
+  실립니다. 상태 플래그가 아니라 네트워크 명세입니다.
+  `GET /api/tailscale/state`(backendState/authUrl + `enabled`)는 계속 열려
+  있고, code-server의 로그인 배너, `/router/` SPA 사이드바, webmanager 사이드바의
+  탭 표시 판단은 모두 이쪽을 씁니다.
+
+**로그인 시도 잠금(rate limit)은 `X-Real-IP` 기준입니다.** router-manager는
+유닉스 소켓을 듣기 때문에 `RemoteAddr`이 모든 호출자에게 동일하고, 그걸로
+버킷을 잡으면 잠금이 전역 하나가 되어 아무나 5번 틀리는 것으로 운영자까지
+무기한 잠글 수 있었습니다. 그 소켓에 닿을 수 있는 건 router 자신의 nginx뿐이고
+`/router/`를 프록시하는 모든 location이 `X-Real-IP $remote_addr`로 **덮어쓰므로**
+그 헤더는 위조될 수 없습니다. 단 `ROUTER_MANAGER_ADDR`로 TCP 바인딩을 쓰는
+로컬 개발 모드에서는 그 전제가 깨지므로, 그때는 다시 `RemoteAddr`을 씁니다
+(직접 호출자가 헤더를 마음대로 넣을 수 있으니, 그쪽이 더 안전합니다).
 webmanager와는 별도의 프로세스/비밀(argon2id 해시 + HMAC 서명 쿠키)이라서
 webmanager 자체 잠금과 독립적으로 켜고 끌 수 있고, 잠긴 쓰기 요청이 401을
 반환하면 webmanager UI가 자동으로 비밀번호 입력 모달을 띄우고 재시도합니다
 (`RouterUnlockModalHost`).
 
 **권장: 앱 안에서 설정 (`/router/`)** — 아무것도 설정하지 않은 채 처음
-띄우면 `GET /api/auth/status`의 `source`가 `"unset"`입니다. 컨테이너의
+띄우면 `GET /api/auth/status`의 `source`가 `"unset"`이고, 위 상자대로 관리
+API는 전부 503입니다(그래서 이건 "나중에 해도 되는 일"이 아니라 첫 부팅
+체크리스트입니다). 컨테이너의
 `http://<host>/router/`를 열면 router-manager가 직접 제공하는 SPA(webmanager
 없이도 접근 가능 — Dev Proxy/App Routes/VNC/Tailscale/DNS/Net 관리/tinyauth 사용자
 관리까지 전부 이 안에서 되고, "설정" 탭이 기본으로 열립니다)가 뜨고, 그 탭에서 새
@@ -435,12 +489,15 @@ webmanager의 `--env-migrate`와 완전히 같은 도구(공유 Go 모듈
 `.env.router`를 최신 키 구조로 재구성하려면:
 
 ```sh
-cat .env.router | tee -a .env.router.bak | docker compose exec -T code-docker-router \
-  router-manager --env-migrate > .env.router
+cat .env.router >> .env.router.bak && docker compose exec -T code-docker-router \
+  router-manager --env-migrate < .env.router > .env.router.new \
+  && mv .env.router.new .env.router
 ```
 
-(`tee -a`로 백업 파일에 매번 이어붙이는 이유는 webmanager 쪽과 동일 —
-code-docker 레포의 `docs/webmanager-config.md`의 마이그레이션 절 참고.)
+(`>>`로 백업을 매번 이어붙이고 `mv`로 마지막에 교체하는 이유는 webmanager 쪽과 동일 —
+code-docker 레포의 `docs/webmanager-config.md`의 마이그레이션 절 참고. 예전의
+`cat f | tee -a f.bak | ... > f` 한 줄 파이프라인은 `> f`가 `cat`보다 먼저 파일을 비울 수 있는
+레이스가 있어 쓰지 않습니다; `--env-migrate`도 그래서 빈 입력을 거부합니다.)
 
 활성화(주석 해제)해둔 값과 직접 남긴 코멘트는 그대로 보존되고, 더 이상 안
 쓰이는 키는 지우지 않고 파일 맨 아래 "더 이상 쓰이지 않는 키" 섹션으로

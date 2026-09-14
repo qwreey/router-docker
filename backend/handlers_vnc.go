@@ -130,15 +130,16 @@ const dialTimeout = 10 * time.Second
 // whatever it wants, and would need revisiting before being relied on for
 // anything more than a cosmetic IP column.
 //
-// authgate's own per-IP rate limiting (clientKey in handlers_auth.go) has
-// this exact same unix-socket blind spot today and is NOT fixed here -
-// every caller's lockout bucket is already keyed on the same
-// meaningless-when-unix-socketed value, but changing what that
-// rate-limiter buckets on is a separate decision with its own
-// consequences (an X-Real-IP an attacker-controlled upstream could
-// spoof, if this were ever deployed behind something other than router's
-// own nginx) and is out of scope for the VNC panel this function exists
-// for.
+// authgate's own per-IP rate limiting had this exact same unix-socket blind
+// spot and was deliberately left alone when this function was written; it's
+// fixed now, in handlers_auth.go's rateLimitKey (2026-09-07 security review,
+// finding H2). That one is NOT just a copy of this function, and the
+// difference is deliberate: it branches on main.go's listenerIsUnix rather
+// than on whether the header happens to be present, and it never falls back
+// to X-Forwarded-For. A wrong IP here costs a misleading column in a UI
+// panel; a caller-chosen key there would let an attacker reset their own
+// lockout on every request, which is worse than the shared bucket it
+// replaced.
 func realClientIP(r *http.Request) string {
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip

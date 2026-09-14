@@ -25,6 +25,7 @@ package netgate
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,6 +54,34 @@ func validateHost(field, host string) error {
 		return fmt.Errorf("%w: %s must be a plain hostname or IPv4 address", ErrValidation, field)
 	}
 	return nil
+}
+
+// validateCIDR checks an OutboundRule.CIDR before it can be written to the
+// live config, where firewall.default.sh will hand it to `iptables -d` (or
+// `ip6tables -d` for an entry containing ':') on its next 30s cycle.
+//
+// Not an injection fix - the value reaches iptables as one argv element, so
+// it can't become a flag or a second rule. It's an "applied silently wrong"
+// fix: an unparseable CIDR makes that one `iptables -A` fail, the loop logs
+// a line nobody is watching and carries on, and the operator is left with a
+// UI that shows a block rule which does not exist. ErrValidation turns that
+// into a 400 at write time instead (see handleReplaceNetgateOutbound).
+//
+// Both families are accepted because firewall.default.sh mirrors v6 entries
+// onto ip6tables (it tells them apart by a bare ':'), and a bare address is
+// accepted alongside a prefix because `iptables -d 8.8.8.8` is a perfectly
+// ordinary single-host rule - rejecting it would refuse valid config.
+func validateCIDR(field, cidr string) error {
+	if cidr == "" {
+		return fmt.Errorf("%w: %s is required", ErrValidation, field)
+	}
+	if _, _, err := net.ParseCIDR(cidr); err == nil {
+		return nil
+	}
+	if net.ParseIP(cidr) != nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s %q is not a valid CIDR or IP address", ErrValidation, field, cidr)
 }
 
 func validatePort(field string, port int) error {
@@ -201,8 +230,8 @@ func ReplaceOutbound(path string, rules []OutboundRule) ([]OutboundRule, error) 
 		if r.Action != "allow" && r.Action != "block" {
 			return nil, ErrInvalidAction
 		}
-		if r.CIDR == "" {
-			return nil, fmt.Errorf("%w: cidr is required", ErrValidation)
+		if err := validateCIDR("cidr", r.CIDR); err != nil {
+			return nil, err
 		}
 	}
 	mu.Lock()

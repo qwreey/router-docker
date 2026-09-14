@@ -14,17 +14,64 @@ import (
 	"router/internal/authgate"
 )
 
-// clientKey identifies the caller for authgate's rate limiting, derived
-// from the TCP peer address rather than X-Forwarded-For/X-Real-IP - router's
-// own nginx doesn't rewrite those on the way in (see the security audit), so
-// an attacker could otherwise reset their own lockout just by sending a
-// different header value on each request.
-func clientKey(r *http.Request) string {
+// peerKey is the caller's transport-level peer address - the raw
+// r.RemoteAddr with any port stripped. Meaningful only on a TCP listener;
+// see rateLimitKey for what actually gets used as authgate's bucket key.
+func peerKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// clientKey is peerKey under its historical name, kept because
+// handlers_vnc.go's realClientIP documents and uses it as its last-resort
+// fallback.
+func clientKey(r *http.Request) string { return peerKey(r) }
+
+// rateLimitKey is the bucket authgate's per-client lockout counts against
+// (see authgate.Gate.TryUnlock). Which value is correct depends entirely on
+// what kind of socket router-manager is listening on, so main.go's listen()
+// records that in listenerIsUnix and this is the only place that reads it:
+//
+//   - unix socket (the default, and every real deployment): r.RemoteAddr is
+//     the socket's own peer and is byte-for-byte identical for every caller,
+//     so keying on it gives ALL clients one shared lockout bucket. Five wrong
+//     guesses from anything that can reach /router/ then locks out the
+//     operator too - a trivially reachable permanent DoS on router's own
+//     admin UI (2026-09-07 security review, finding H2). X-Real-IP is the
+//     only thing that distinguishes callers here, and it is trustworthy
+//     precisely because a unix socket has no route in except router's own
+//     nginx, which sets that header unconditionally from $remote_addr on
+//     every location that proxies to this socket (see
+//     config/nginx/nginx.default.conf's /router/ and
+//     nginx-service.default.sh's ROUTER_MANAGER_HOSTS block) rather than
+//     passing through whatever a client sent. Same trust argument
+//     handlers_vnc.go's realClientIP already makes, and it stands or falls
+//     with the listener, not with this package.
+//   - TCP (ROUTER_MANAGER_ADDR, the documented local-dev escape hatch): any
+//     direct caller can set X-Real-IP to anything, so trusting it would let
+//     an attacker reset their own lockout every request - strictly worse than
+//     one shared bucket. r.RemoteAddr is both real and per-client there, so
+//     use it.
+//
+// Deliberately does NOT fall back to X-Forwarded-For the way realClientIP
+// does: that one is cosmetic (an IP column), this one decides whose
+// lockout is whose, and XFF is the header an upstream appends to rather
+// than overwrites.
+func rateLimitKey(r *http.Request) string {
+	if listenerIsUnix {
+		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+			return ip
+		}
+		// No X-Real-IP on a unix socket means something other than
+		// router's own nginx is talking to it. Fall back to the shared
+		// peer key: one bucket is bad, but it is at least not a bucket
+		// an unknown caller gets to name.
+		return peerKey(r)
+	}
+	return peerKey(r)
 }
 
 // handleAuthUnlock verifies a submitted password against the configured
@@ -40,7 +87,7 @@ func handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, ok, err := gate.TryUnlock(clientKey(r), body.Password)
+	token, ok, err := gate.TryUnlock(rateLimitKey(r), body.Password)
 	if err != nil {
 		if errors.Is(err, authgate.ErrRateLimited) {
 			writeError(w, http.StatusTooManyRequests, err.Error())

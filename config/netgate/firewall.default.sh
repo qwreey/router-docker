@@ -50,6 +50,113 @@ ensure_jump() {
 	iptables -t "$1" -C "$2" -j "$3" 2>/dev/null || iptables -t "$1" -I "$2" 1 -j "$3"
 }
 
+# --- IPv6 (security-review H3 fix, 2026-09-14) --------------------------
+#
+# Every function/rule above and below this block is IPv4-only and
+# deliberately untouched. IPv6 is off by default (ENABLE_IPV6 unset/false
+# in example-env only configures docker-compose's own network defs, never
+# passed into this container as an env var) - so detection here is dynamic
+# (a live global-scope IPv6 address actually assigned to this container),
+# not a re-read of that var, and in the common case none of this runs at
+# all. This mirrors only the fixed always-block set (ULA/link-local/
+# loopback, the v6 analogues of the v4 RFC1918/link-local/loopback set
+# above) plus whatever outbound: entries in config.yaml happen to be v6
+# CIDRs - config.default.yaml ships v4-only today, so that part is a no-op
+# until config.yaml actually grows a v6 entry (config-driven v6 rules
+# aren't a supported feature yet, this just means one won't be silently
+# dropped later). forwards: (DNAT) and bandwidth: are NOT mirrored to v6 -
+# out of scope for this fix, see docs/egress-netgate.md's IPv6 section.
+ensure_chain6() {
+	ip6tables -t "$1" -N "$2" 2>/dev/null || ip6tables -t "$1" -F "$2"
+}
+
+ensure_jump6() {
+	ip6tables -t "$1" -C "$2" -j "$3" 2>/dev/null || ip6tables -t "$1" -I "$2" 1 -j "$3"
+}
+
+# A global-scope IPv6 address only shows up once Docker's own IPv6 network
+# support has actually assigned one to this container - the real signal
+# that IPv6 traffic can flow on this path at all, independent of whether
+# ENABLE_IPV6 was ever set (which this script never sees directly). Every
+# interface gets a link-local (fe80::/10, scope "link") address regardless,
+# so filtering on scope global specifically is what keeps this from
+# false-triggering on a stock IPv6-disabled deployment.
+ipv6_present() {
+	ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'
+}
+
+# Loud AND persistent, per this repo's "no silent skips in setup scripts"
+# rule - a single log line scrolls off and gets missed, so this prints a
+# multi-line block, and apply_rules_v6 (called from the same 30s loop
+# apply_rules already runs in) re-triggers it every cycle for as long as
+# the condition holds, instead of warning once and going quiet.
+warn_ipv6_unfiltered() {
+	echo >&2 "=================================================================="
+	echo >&2 "netgate-firewall: WARNING - IPv6 is active on this container but its"
+	echo >&2 "netgate-firewall: WARNING - FORWARD traffic is NOT being filtered: $1"
+	echo >&2 "netgate-firewall: WARNING - only IPv4 egress is protected right now."
+	echo >&2 "netgate-firewall: WARNING - see router/docs/egress-netgate.md (IPv6 section)."
+	echo >&2 "=================================================================="
+}
+
+# Called from apply_rules below, in the same process (not a subshell), so
+# it shares apply_rules' own $config_snapshot/$out_count instead of
+# re-parsing config.yaml a second time.
+apply_rules_v6() {
+	if ! ipv6_present; then
+		# Nothing to filter and nothing to warn about: in this state no
+		# traffic crosses the FORWARD chain over v6 at all.
+		return 0
+	fi
+
+	if ! command -v ip6tables >/dev/null 2>&1; then
+		warn_ipv6_unfiltered "ip6tables binary not found in this image"
+		return 0
+	fi
+
+	ensure_chain6 filter NETGATE-FORWARD6
+	ensure_jump6 filter FORWARD NETGATE-FORWARD6
+
+	# Same reasoning as the v4 stateful-accept rule below: without this,
+	# return traffic for an already-permitted v6 connection gets
+	# re-evaluated by the block rules on its way back.
+	if ! ip6tables -A NETGATE-FORWARD6 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; then
+		warn_ipv6_unfiltered "failed to insert the ip6tables stateful-accept rule"
+		return 1
+	fi
+
+	# Fixed block set: ULA (fc00::/7, the v6 analogue of RFC1918),
+	# link-local (fe80::/10) and loopback (::1/128) - applied
+	# unconditionally, the same fixed set the v4 side hardcodes for
+	# link-local/loopback rather than leaving it to config.yaml.
+	ip6tables -A NETGATE-FORWARD6 -d fc00::/7 -j DROP || warn_ipv6_unfiltered "failed to apply the fc00::/7 (ULA) block rule"
+	ip6tables -A NETGATE-FORWARD6 -d fe80::/10 -j DROP || warn_ipv6_unfiltered "failed to apply the fe80::/10 (link-local) block rule"
+	ip6tables -A NETGATE-FORWARD6 -d ::1/128 -j DROP || warn_ipv6_unfiltered "failed to apply the ::1/128 (loopback) block rule"
+
+	# Mirror outbound: only for entries that are themselves v6 CIDRs - a
+	# bare ':' reliably tells a v6 CIDR from a v4 one (a dotted-quad CIDR
+	# never contains one).
+	v6_out_count=0
+	i=0
+	while [ "$i" -lt "$out_count" ]; do
+		cidr=$(printf '%s' "$config_snapshot" | yq -r ".outbound[$i].cidr")
+		case "$cidr" in
+		*:*)
+			action=$(printf '%s' "$config_snapshot" | yq -r ".outbound[$i].action")
+			case "$action" in
+			allow) ip6tables -A NETGATE-FORWARD6 -d "$cidr" -j ACCEPT ;;
+			block) ip6tables -A NETGATE-FORWARD6 -d "$cidr" -j DROP ;;
+			*) echo >&2 "netgate-firewall: unknown action '$action' for v6 cidr $cidr, skipping" ;;
+			esac
+			v6_out_count=$((v6_out_count + 1))
+			;;
+		esac
+		i=$((i + 1))
+	done
+
+	echo "netgate-firewall: applied ip6tables fixed block set + $v6_out_count config-driven v6 outbound rule(s)"
+}
+
 apply_rules() {
 	NETGATE_CONFIG="$(resolve_config_path)"
 	default_iface="$(ip -4 route show default 2>/dev/null | awk '{ print $5; exit }')"
@@ -136,6 +243,13 @@ apply_rules() {
 	done
 
 	echo "netgate-firewall: applied $fwd_count forward(s), $out_count outbound rule(s) (external=$default_iface)"
+
+	# v6 is applied last and never affects the return status of the v4
+	# path above - a v6 warning/failure must not make apply_rules itself
+	# look like it failed and get retried (the v4 rules it would be
+	# retrying are already applied and fine).
+	apply_rules_v6
+	return 0
 }
 
 # net.ipv4.ip_forward=1 is set declaratively via docker-compose.yml's

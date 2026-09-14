@@ -161,6 +161,43 @@ FORWARD되는 트래픽뿐 아니라 router 자기 자신이 만드는 트래픽
 게이트웨이를 거치지 않는다" 절과 동일한 이유로 이 큐잉 규칙도 거치지 않습니다 - 오직
 router의 기본 인터페이스를 실제로 통과하는(즉 외부로 나가는) 트래픽만 대상입니다.
 
+## IPv6
+
+위 모든 내용(`outbound:`, `forwards:`, `bandwidth:`)은 원래 IPv4 전용이었습니다 -
+`ip -4`/`iptables`만 썼고 `ip6tables`는 아예 참조하지 않았습니다. `ENABLE_IPV6`(루트
+`example-env`)는 `code-docker-internal`/`code-docker-external` 두 네트워크에
+`enable_ipv6`를 켜는 순수 docker-compose 옵션일 뿐이라, 기본값(꺼짐)에서는 아무 문제가
+없었지만 켜는 순간 v6 경로에는 필터가 0개였고 경고도 없었습니다(보안 감사 H3, 2026-09).
+
+**지금 하는 것**: `firewall.default.sh`가 매 주기(30초)마다 이 컨테이너에
+global-scope IPv6 주소가 실제로 붙어있는지 동적으로 확인합니다(`ENABLE_IPV6` 값을
+직접 읽는 게 아니라 - 그 값은 이 컨테이너 안 환경변수가 아니므로 볼 수도 없습니다).
+붙어있으면(=IPv6가 실제로 쓰이는 상태) `ip6tables`로 `NETGATE-FORWARD6` 체인을 만들어
+FORWARD에 걸고, 고정된 차단 세트를 적용합니다: `fc00::/7`(ULA, v4의 RFC1918에 대응),
+`fe80::/10`(link-local), `::1/128`(loopback). `outbound:` 목록도 훑지만, 그 안의 항목이
+**v6 CIDR일 때만**(`:` 포함 여부로 판별) 미러링합니다 - `config.default.yaml`은 지금
+v4 CIDR만 들어있으므로 이 부분은 사실상 no-op입니다.
+
+**지금 안 하는 것**: `forwards:`(포트 DNAT)와 `bandwidth:`(tc 큐잉)는 v6으로
+미러링되지 않습니다 - 이번 수정 범위 밖입니다. `outbound:`도 config 자체가 아직
+v4 CIDR만 지원하는 형태라, v6 항목을 config.yaml/Net 관리 탭에 실제로 추가할 수 있게
+만드는 건 별도 작업입니다(지금은 이미 들어있는 v6 CIDR을 우연히 미러링해줄 뿐, 그런
+항목을 넣는 UI/스키마 지원은 없습니다).
+
+**ip6tables가 없거나 규칙 적용이 실패하면**: 조용히 넘어가지 않고, IPv6가 실제로
+붙어있는 상태에서만(꺼져 있으면 아무 트래픽도 v6으로 FORWARD를 못 타므로 경고할
+이유가 없음) 매 30초 주기마다 `docker compose logs`에 여러 줄짜리 큰 경고 블록을
+반복 출력합니다("IPv6 is active ... but ... NOT being filtered"). 이 경고가 안
+보이면 v6이 실제로 켜져 있지 않다는 뜻입니다 - 반대로 이 경고가 보이는데도 방치하면
+v6 경로는 무제한 상태로 계속 운영되는 것이니 즉시 확인하세요.
+
+**여전히 IPv6을 아예 끄는 게 가장 단순하고 안전한 기본값입니다** - `ENABLE_IPV6`를
+설정하지 않거나 `false`로 두면(기본값) 위 코드 경로 자체가 전혀 실행되지 않습니다.
+컨테이너 자체의 `net.ipv6.conf.all.disable_ipv6=1` sysctl 강제는 이번 수정
+범위 밖입니다(compose 파일 변경이 필요) - 대신 `ENABLE_IPV6`를 켜지 않는 것으로
+동일한 효과를 얻으세요. `example-env`의 `ENABLE_IPV6` 주석에도 이 커버리지 요약이
+있습니다.
+
 ## 예전에 있었던 함정 (moby/moby#50326) - 2026-08-25 구조적으로 해소됨
 
 Docker 엔진에는 알려진 이슈([moby/moby#50326](https://github.com/moby/moby/issues/50326))가

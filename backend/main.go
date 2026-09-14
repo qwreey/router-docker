@@ -129,7 +129,15 @@ func main() {
 	mux.Handle("POST /api/tailscale/publish", gate.RequirePassword(http.HandlerFunc(handleAddTailscalePublish)))
 	mux.Handle("PUT /api/tailscale/publish/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateTailscalePublish)))
 	mux.Handle("DELETE /api/tailscale/publish/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteTailscalePublish)))
-	mux.HandleFunc("GET /api/tailscale/status", handleTailscaleStatus)
+	// Gated despite being a GET, the same exception GET
+	// /api/vnc/targets/{name}/ws makes to the "reads stay open" convention:
+	// this returns `tailscale status --json` in full - every peer's
+	// hostname, tailnet IP, tags and online state, i.e. a map of the
+	// operator's whole private network. GET /api/tailscale/state stays open
+	// for the two things that legitimately need no credential (code-server's
+	// sign-in banner and both sidebars' "is tailscale even on" check); it
+	// carries `enabled` + backendState/authUrl and nothing about peers.
+	mux.Handle("GET /api/tailscale/status", gate.RequirePassword(http.HandlerFunc(handleTailscaleStatus)))
 	mux.Handle("POST /api/tailscale/login/start", gate.RequirePassword(http.HandlerFunc(handleTailscaleLoginStart)))
 	mux.Handle("POST /api/tailscale/login/cancel", gate.RequirePassword(http.HandlerFunc(handleTailscaleLoginCancel)))
 	mux.HandleFunc("GET /api/dev-proxy/exposes", handleListDevProxyExposes)
@@ -273,6 +281,17 @@ func normalizeCaddyFragments() {
 	}
 }
 
+// listenerIsUnix records which of listen()'s two branches was taken. Only
+// handlers_auth.go's rateLimitKey reads it, and it needs to: on a unix
+// socket every caller shares one r.RemoteAddr, so the lockout bucket has to
+// be keyed on the X-Real-IP router's own nginx guarantees; on TCP that
+// header is forgeable by the caller and r.RemoteAddr is the real thing.
+// Package-level rather than threaded through a server struct for the same
+// reason `gate` above is - this package's handlers are free functions.
+// Written once from listen(), before http.Serve ever starts a goroutine, so
+// there is no race with the handlers that read it.
+var listenerIsUnix bool
+
 // listen binds a unix socket by default (ROUTER_MANAGER_SOCK, default
 // /run/router-manager.sock). Setting ROUTER_MANAGER_ADDR is an explicit
 // opt-in to bind TCP instead - useful for local development outside a
@@ -280,8 +299,10 @@ func normalizeCaddyFragments() {
 // reach a unix socket anyway.
 func listen() (net.Listener, error) {
 	if addr := os.Getenv("ROUTER_MANAGER_ADDR"); addr != "" {
+		listenerIsUnix = false
 		return net.Listen("tcp", addr)
 	}
+	listenerIsUnix = true
 	sockPath := os.Getenv("ROUTER_MANAGER_SOCK")
 	if sockPath == "" {
 		sockPath = "/run/router-manager.sock"

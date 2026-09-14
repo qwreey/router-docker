@@ -273,11 +273,15 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
     `X-Forwarded-For $proxy_add_x_forwarded_for`, overwriting whatever a
     client sent rather than passing it through — see `realClientIP`'s own
     doc comment for exactly why that stops holding if `ROUTER_MANAGER_ADDR`
-    is ever pointed at a TCP address instead. `clientKey`'s own rate-limiting
-    has this identical unix-socket blind spot today (every caller shares one
-    lockout bucket) and is **deliberately not fixed here** — that's a
-    separate decision with its own trust tradeoffs, left as a documented gap
-    next to `realClientIP` rather than folded into this change.
+    is ever pointed at a TCP address instead. authgate's own rate-limiting
+    had this identical unix-socket blind spot (every caller sharing one
+    lockout bucket) and was left as a documented gap here at the time; it was
+    **closed on 2026-09-14** by `handlers_auth.go`'s `rateLimitKey`, which
+    makes the same X-Real-IP-vs-RemoteAddr choice this function does but
+    branches on `main.go`'s `listenerIsUnix` instead of on header presence —
+    because a forgeable key is strictly worse than a shared one for a
+    lockout, so the TCP case must *not* fall back to the header. See the
+    admin-API auth paragraph further down.
 
     Disconnecting isn't just `Close()` on the stored `net.Conn`: BackendRFB's
     own `novncQuery` always sets `reconnect=1` (see `internal/vnc`), so the
@@ -543,7 +547,22 @@ location (`config/nginx/nginx.default.conf`, also serving the built SPA — see
 (`ROUTER_MANAGER_ADDR` is an opt-in TCP escape hatch for local dev outside the container).
 The old per-feature code-docker-nginx locations (`/tailscale/`, `/dev-proxy/`,
 `/router-auth/`) are gone — code-docker isn't even attached to `code-docker-external`
-anymore, so it was never a legitimate proxy point for this. Routes router-manager serves:
+anymore, so it was never a legitimate proxy point for this.
+**Every location that proxies to that socket denies `code-docker-internal` source
+addresses** (`ROUTER_NGINX_DENY_INTERNAL_MANAGER`, default on, 2026-09-07 security
+review finding C2) — the shared hostname's `/router/` in `nginx.default.conf` *and*
+both locations of `nginx-service.default.sh`'s `ROUTER_MANAGER_HOSTS` block, because
+that block is chosen by `server_name` alone and an internal caller would otherwise just
+set the Host header (its `location /` matters just as much as its `/router/`: it passes
+the path through unstripped, so `/api/netgate/outbound` at that domain's root reaches
+the admin API directly). The CIDR is detected once in `nginx-service.default.sh` and
+reused by both toggles, so `/exports/` and `/router/` can never disagree about what
+"inside" means; an undetectable subnet warns loudly and emits no deny rather than
+failing the whole front door closed. The comment on `/router/` used to claim the exact
+opposite — that code-docker's nginx was a legitimate caller because webmanager's tabs
+"proxy through it" — and that was simply false: webmanager's Go backend never calls
+`/router/` server-side at all, those tabs are a browser `<iframe>` plus browser
+`fetch`es, which arrive from outside. Routes router-manager serves:
 full tailscale CRUD (`GET`/`PUT
 /api/tailscale/config`, `GET`/`POST`/`PUT`/`DELETE /api/tailscale/forwards[/{name}]`,
 same for `/publish`, `GET /api/tailscale/status`, `POST /api/tailscale/login/
@@ -640,10 +659,39 @@ a trailing slash. Confirmed live that an absolute `/` base 404s every asset unde
 since the browser resolves a root-absolute `src` against the origin root, bypassing the
 `/router/` prefix entirely.
 
-router-manager's own admin-API auth (`backend/internal/authgate`) is opt-in via
-`ROUTER_MANAGER_AUTH_PASSWORD_HASH` and gates every *mutating* route above (tailscale
-config/forwards/publish/login writes, dev-proxy expose writes) — reads (state, config,
-list, status) stay open. The recommended path is setting a password in-app at
+router-manager's own admin-API auth (`backend/internal/authgate`) gates every *mutating*
+route above (tailscale config/forwards/publish/login writes, dev-proxy expose writes) —
+reads (state, config, list) stay open. **It is no longer opt-in: as of the 2026-09-07
+security review (finding C2), `RequirePassword` is fail-CLOSED.** With no password
+configured it answers `503 {"error":"router-manager password not configured - ..."}`
+instead of calling `next.ServeHTTP` — which it used to do unconditionally, meaning a
+default install shipped an unauthenticated admin API that could rewrite netgate's own
+egress rules. 503 and not 401 on purpose: 401 is what `frontend/src/api/client.ts` turns
+into an unlock prompt, and there is no password to type yet. `GET /api/auth/status` and
+`POST /api/auth/setup` are deliberately unwrapped, so the first-run setup flow still
+works from a fully-locked state; that's what keeps this from being a brick.
+`GET /api/tailscale/status` moved *behind* the gate in the same pass — it returns the
+whole tailnet peer list (hostnames, IPs, tags, online state), which is a description of
+the operator's private network, not a status flag. That made it the second `GET`
+exception alongside the VNC RFB bridge, and it forced a matching frontend change: both
+sidebars' `useTailscaleEnabled.ts` polled `/status` every 5s purely for its `enabled`
+bool, and a *background* poll of a gated route would pop the unlock modal by itself on
+every tick. This repo's own hook reads `/api/tailscale/state` now (same `enabled` field,
+ungated, already what code-server's sign-in banner polls), and code-docker's webmanager
+copy of the hook was moved to `/state` in the same pass — left on `/status` it would have
+swallowed the 401/503 into "enabled" and kept webmanager's Tailscale tab visible with
+`TAILSCALE_ENABLED=false`.
+Second half of the same review, finding H2: authgate's per-client lockout is keyed by
+`handlers_auth.go`'s `rateLimitKey`, which reads `X-Real-IP` **when the listener is a
+unix socket** (`main.go`'s `listenerIsUnix`, set by `listen()`) and `r.RemoteAddr` when
+it's TCP. Keying on `RemoteAddr` under a unix socket gave every caller one shared bucket,
+so five wrong guesses from anything that could reach `/router/` locked the operator out
+indefinitely; the header is trustworthy there for exactly the reason `realClientIP`
+already documents — nothing but router's own nginx can dial that socket, and every
+`/router/` location overwrites `X-Real-IP` from `$remote_addr`. On TCP the header is
+caller-forgeable (an attacker would reset their own lockout per request), which is why
+the branch exists rather than just always preferring the header.
+The recommended path is still setting a password in-app at
 `/router/` instead of via env var, though — see docs/router.md's "router-manager 자체
 인증" for the file-backed store (`ROUTER_VOLUME`), setup/change UI, and forgot-password
 recovery; the env var remains as an infra-as-code pin that always wins over the

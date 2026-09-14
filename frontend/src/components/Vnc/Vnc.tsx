@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minimize2, ExternalLink } from 'lucide-react'
-import { vncApi as api, errorMessage } from '../../api/client'
+import { vncApi as api, errorMessage, requestUnlock } from '../../api/client'
 import type { VncTarget, VncTargetInfo, VncTargetsResponse } from '../../api/types'
 import { ErrorBanner } from '../common/ErrorBanner'
 import { Skeleton } from '../common/Skeleton'
@@ -211,9 +211,34 @@ export function Vnc() {
   // A BackendRFB viewer's WebSocket goes through router-manager's own
   // password gate, so a locked session gets a viewer that loads and then
   // silently fails to connect. Say so instead.
-  const { status: authStatus } = useAuthStatus()
+  const { status: authStatus, refresh: refreshAuthStatus } = useAuthStatus()
+  // Unlock from *this* card, not "go find the sidebar": when this page is
+  // the <iframe> inside webmanager's VNC tab, the only sidebar the user can
+  // see is webmanager's own, whose lock button unlocks webmanager's gate -
+  // a different process with a different cookie - so pointing at it sent
+  // them to the wrong lock. requestUnlock() shares RouterUnlockModalHost with
+  // the sidebar footer and the 401 path, so it works identically embedded
+  // or standalone.
+  async function handleUnlockClick() {
+    try {
+      await requestUnlock()
+      await refreshAuthStatus()
+    } catch {
+      // user cancelled the prompt - nothing to do
+    }
+  }
   const lockedOut = Boolean(
     openTarget?.viewerOrigin === 'self' && authStatus?.required && !authStatus.unlocked,
+  )
+  // Same gate, different reason: since the 2026-09-07 security review
+  // (finding C2) RequirePassword is fail-closed, so with NO password
+  // configured at all the bridge answers 503 rather than passing through -
+  // noVNC only ever surfaces that as "Connection closed (code: 1006)", which
+  // reads like the target being down. Every other tab keeps working in that
+  // state (their reads are ungated), which is exactly why this one needs its
+  // own explanation.
+  const notConfigured = Boolean(
+    openTarget?.viewerOrigin === 'self' && authStatus && !authStatus.required,
   )
 
   // Second half of the handoff: the embed has now been unmounted (effects
@@ -494,7 +519,25 @@ export function Vnc() {
             <span aria-hidden="true">⚠</span>
             <span>
               router-manager가 잠겨 있어 뷰어가 대상에 연결할 수 없습니다 — 이 백엔드는 App Routes/tinyauth가
-              아니라 router-manager 자신의 비밀번호로 보호됩니다. 사이드바 아래쪽의 잠금 해제를 먼저 하세요.
+              아니라 router-manager 자신의 비밀번호로 보호됩니다. (webmanager 안에서 보고 있다면 webmanager의
+              잠금 해제와는 별개입니다.)
+            </span>
+            <button type="button" className="btn btn-small" onClick={handleUnlockClick}>
+              router-manager 잠금 해제
+            </button>
+          </div>
+        </div>
+      )}
+
+      {notConfigured && (
+        <div className="card">
+          <div className="info-note">
+            <span aria-hidden="true">⚠</span>
+            <span>
+              router-manager 비밀번호가 아직 설정되지 않아 뷰어가 대상에 연결할 수 없습니다 — 이 백엔드의
+              WebSocket 브리지는 router-manager 자신의 비밀번호로 보호되며, 비밀번호가 없으면 통과가 아니라
+              거부(503)입니다. <strong>설정</strong> 탭에서 비밀번호를 정하거나 <code>.env.router</code>의{' '}
+              <code>ROUTER_MANAGER_AUTH_PASSWORD_HASH</code>를 설정한 뒤 다시 여세요.
             </span>
           </div>
         </div>
@@ -517,7 +560,7 @@ export function Vnc() {
         </div>
       )}
 
-      {openTarget && viewerOrigin && !lockedOut && (
+      {openTarget && viewerOrigin && !lockedOut && !notConfigured && (
         <Viewer
           key={viewerOrigin + openTarget.viewerPath}
           info={openTarget}

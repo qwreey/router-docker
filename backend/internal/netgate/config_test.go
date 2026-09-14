@@ -1,6 +1,9 @@
 package netgate
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestAddForwardRejectsInvalidTargetHost(t *testing.T) {
 	path := t.TempDir() + "/config.yaml"
@@ -85,5 +88,58 @@ func TestGetBandwidthOnMissingFileReturnsEmptyNotNil(t *testing.T) {
 	}
 	if got.Services == nil {
 		t.Fatalf("GetBandwidth(missing file).Services = nil, want empty slice (JSON null crashes the frontend)")
+	}
+}
+
+func TestReplaceOutboundRejectsMalformedCIDR(t *testing.T) {
+	// Each of these used to be written to the live config verbatim, where
+	// firewall.default.sh's `iptables -A ... -d <cidr>` fails on the next
+	// cycle and only logs - the UI kept showing a rule that was never in the
+	// chain. See validateCIDR's doc comment.
+	for _, cidr := range []string{
+		"",
+		"10.0.0.0/33",
+		"10.0.0.0/",
+		"not-a-cidr",
+		"10.0.0.0 /8",
+		"999.0.0.0/8",
+		"10.0.0.0/8 -j ACCEPT",
+	} {
+		path := t.TempDir() + "/config.yaml"
+		_, err := ReplaceOutbound(path, []OutboundRule{{Action: "block", CIDR: cidr}})
+		if err == nil {
+			t.Fatalf("ReplaceOutbound(cidr=%q) = nil error, want validation error", cidr)
+		}
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("ReplaceOutbound(cidr=%q) = %v, want ErrValidation so the handler answers 400", cidr, err)
+		}
+	}
+}
+
+func TestReplaceOutboundAcceptsEveryValidForm(t *testing.T) {
+	// v6 is accepted because firewall.default.sh mirrors ':'-containing
+	// entries onto ip6tables; a bare address is accepted because
+	// `iptables -d 8.8.8.8` is an ordinary single-host rule.
+	rules := []OutboundRule{
+		{Action: "block", CIDR: "10.0.0.0/8"},
+		{Action: "allow", CIDR: "192.168.1.5"},
+		{Action: "block", CIDR: "fc00::/7"},
+		{Action: "allow", CIDR: "::1"},
+	}
+	path := t.TempDir() + "/config.yaml"
+	got, err := ReplaceOutbound(path, rules)
+	if err != nil {
+		t.Fatalf("ReplaceOutbound(valid) = %v, want success", err)
+	}
+	if len(got) != len(rules) {
+		t.Fatalf("ReplaceOutbound() returned %d rules, want %d", len(got), len(rules))
+	}
+}
+
+func TestReplaceOutboundRejectsUnknownAction(t *testing.T) {
+	path := t.TempDir() + "/config.yaml"
+	_, err := ReplaceOutbound(path, []OutboundRule{{Action: "drop", CIDR: "10.0.0.0/8"}})
+	if !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("ReplaceOutbound(action=drop) = %v, want ErrInvalidAction", err)
 	}
 }

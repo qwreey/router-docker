@@ -100,9 +100,10 @@ type Gate struct {
 // New creates a Gate. envHash empty means no infra-as-code pin; storePath
 // empty disables file-backed setup/change entirely (Configured() then
 // depends solely on envHash, and SetupPassword/ChangePassword always
-// error). Gate is disabled (Configured() false, RequirePassword passes
-// every request through) only when neither source yields a hash — the
-// default when nothing has been set up yet.
+// error). Configured() is false only when neither source yields a hash —
+// the default when nothing has been set up yet, in which case
+// RequirePassword refuses every gated route with 503 rather than passing it
+// through (see RequirePassword).
 //
 // The HMAC secret is freshly random on every call, never persisted — a
 // process restart therefore invalidates every previously issued token.
@@ -395,15 +396,36 @@ func (g *Gate) SetCookie(w http.ResponseWriter, token string) {
 	})
 }
 
-// RequirePassword gates next behind the configured password. If the gate
-// isn't configured at all, requests pass through unconditionally — this is
-// the critical "off by default" behavior: no currently-working
-// unauthenticated route should break just because this middleware now
-// exists somewhere in front of it.
+// RequirePassword gates next behind the configured password.
+//
+// Fail-CLOSED when no password is configured at all: the request is refused
+// with 503, not passed through. This reverses the original "off by default,
+// so nothing that works today breaks" behavior, and the reversal is the
+// point — the routes behind this middleware are the ones that rewrite
+// netgate's egress CIDR list, the DNS resolver, inbound port forwards and
+// tinyauth's user table. Passing those through unauthenticated meant a
+// default install shipped an admin API with no credential at all, so any
+// process that could reach router (before the companion nginx deny, that
+// was every process inside code-docker and dind) could delete the egress
+// fence that exists *because* that code isn't trusted, or claim the admin
+// password before the operator ever did. See the 2026-09-07 security review,
+// finding C2.
+//
+// 503 rather than 401 on purpose: 401 means "you didn't authenticate",
+// which would send the frontend to an unlock prompt that cannot possibly
+// succeed — there is no password to type yet. 503 plus a message naming the
+// fix says the server isn't in a state to serve this route at all.
+//
+// This never traps anyone out of their own router: POST /api/auth/setup
+// (and GET /api/auth/status, which tells the SPA to show the setup form) are
+// deliberately not wrapped in this middleware, so the first-run "set a
+// password" flow still works with the gate unconfigured. Every unwrapped
+// read route is likewise untouched — this only ever sees routes that were
+// already meant to be privileged.
 func (g *Gate) RequirePassword(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.Configured() {
-			next.ServeHTTP(w, r)
+			writeNotConfigured(w)
 			return
 		}
 		if !g.Unlocked(r) {
@@ -438,4 +460,16 @@ func writeUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"password required"}`))
+}
+
+// writeNotConfigured is RequirePassword's refusal when no password exists
+// yet. Deliberately NOT 401: a 401 tells the frontend "authenticate and
+// retry", and there is nothing to authenticate with — the unlock modal
+// would open onto a password that was never set. The message names both
+// ways out (the env pin and the in-app setup dialog) because this response
+// is the only place a user meets this state.
+func writeNotConfigured(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write([]byte(`{"error":"router-manager password not configured - set ROUTER_MANAGER_AUTH_PASSWORD_HASH or use the setup dialog"}`))
 }

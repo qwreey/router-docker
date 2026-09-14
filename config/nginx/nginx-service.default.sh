@@ -69,19 +69,30 @@ if [ -n "${TRUSTED_PROXIES:-}" ]; then
 fi
 export NGINX_TRUSTED_PROXIES_DIRECTIVES="$directives"
 
-# detect_internal_subnet - code-docker-internal has no pinned subnet in
+# detect_internal_subnets - code-docker-internal has no pinned subnet in
 # docker-compose.yml (Docker auto-assigns it, so multiple PREFIX instances
 # on one host never fight over the same hardcoded CIDR). router sits on
-# both code-docker-internal and code-docker-external, so it can find
-# code-docker-internal's live CIDR itself: the interface NOT carrying the
-# default route is always code-docker-external (the only network with a
-# real gateway - code-docker-internal is `internal: true`), so the *other*
-# connected/kernel-scope route belongs to code-docker-internal. This is the
-# same "no default route = internal-side interface" heuristic
-# dind-entrypoint.sh already uses to find its own IP. Only reliable while
-# router has exactly these two networks - if a third one is ever added,
-# fall back to setting ROUTER_INTERNAL_SUBNET explicitly.
-detect_internal_subnet() {
+# code-docker-external plus every fenced network, so it can find the fenced
+# side's live CIDRs itself: the interface carrying the default route is
+# always code-docker-external (the only network with a real gateway - every
+# other one is `internal: true`, or a sibling project's own isolated network
+# such as a VNC-only one), so *every other* connected/kernel-scope route
+# belongs to something router is the fence for. Same "no default route =
+# internal-side interface" heuristic dind-entrypoint.sh uses to find its
+# own IP.
+#
+# Prints one CIDR per line - ALL of them, not just the first. Until
+# 2026-09-14 this stopped at the first match, which was only right while
+# router had exactly two networks: with an EXTRA_INCLUDE sibling attached
+# (roblox-studio-docker adds its own VNC/chrome networks to router) the
+# first non-default link route was the sibling's network, so the generated
+# `deny` guarded the wrong subnet and code-docker itself sailed past both
+# /exports/ and /router/ - found live while verifying the C2 fix, with no
+# warning anywhere because detection had "succeeded". Denying every
+# non-default network is the correct rule anyway: nothing behind router's
+# fence, sibling or not, is a legitimate caller of the admin API or of
+# /exports/.
+detect_internal_subnets() {
     default_dev="$(ip -4 route show default 2>/dev/null \
         | awk '{for (i=1;i<=NF;i++) if ($i=="dev") { print $(i+1); exit }}')"
     [ -n "$default_dev" ] || return 1
@@ -90,32 +101,76 @@ detect_internal_subnet() {
             {
                 dev=""
                 for (i=1;i<=NF;i++) if ($i=="dev") dev=$(i+1)
-                if (dev != "" && dev != skip) { print $1; exit }
+                if (dev != "" && dev != skip) print $1
             }'
 }
 
+# The CIDR set every internal-source deny below is built from, resolved
+# exactly once: ROUTER_INTERNAL_SUBNET if set (comma-separated for more than
+# one), else whatever detect_internal_subnets finds live. Two locations need
+# this deny now (/exports/ and every location that proxies to
+# router-manager's socket), and they must never disagree about what "inside"
+# means - hence one detection, one directive string, two toggles.
+internal_subnets="$(printf '%s' "${ROUTER_INTERNAL_SUBNET:-}" | tr ',' '\n')"
+if [ -z "$internal_subnets" ]; then
+    internal_subnets="$(detect_internal_subnets || true)"
+fi
+deny_internal_directive=""
+for internal_subnet in $internal_subnets; do
+    [ -n "$internal_subnet" ] || continue
+    deny_internal_directive="${deny_internal_directive}deny ${internal_subnet};
+            "
+done
+if [ -n "$deny_internal_directive" ]; then
+    deny_internal_directive="${deny_internal_directive}allow all;"
+    echo "nginx-service: internal-source deny covers: $(printf '%s' "$internal_subnets" | tr '\n' ' ')"
+fi
+
 # ROUTER_NGINX_DENY_INTERNAL_EXPORTS (default "true") - denies
-# code-docker-internal source addresses from reaching /exports/ directly,
-# using ROUTER_INTERNAL_SUBNET if set, else the CIDR detect_internal_subnet
-# finds live above. "false" disables the check entirely (empty directive =
-# nginx's own default, allow all) - the escape hatch for a topology where a
-# trusted proxy (e.g. a user's own Caddy) legitimately reaches router *from
-# inside* code-docker-internal instead of from outside.
+# code-docker-internal source addresses from reaching /exports/ directly.
+# "false" disables the check entirely (empty directive = nginx's own default,
+# allow all) - the escape hatch for a topology where a trusted proxy (e.g. a
+# user's own Caddy) legitimately reaches router *from inside*
+# code-docker-internal instead of from outside.
 case "${ROUTER_NGINX_DENY_INTERNAL_EXPORTS:-true}" in
     false)
         export NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE=""
         ;;
     *)
-        internal_subnet="${ROUTER_INTERNAL_SUBNET:-}"
-        if [ -z "$internal_subnet" ]; then
-            internal_subnet="$(detect_internal_subnet || true)"
-        fi
-        if [ -n "$internal_subnet" ]; then
-            export NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE="deny ${internal_subnet};
-            allow all;"
-        else
+        export NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE="$deny_internal_directive"
+        if [ -z "$deny_internal_directive" ]; then
             echo "nginx-service: ROUTER_NGINX_DENY_INTERNAL_EXPORTS is on but couldn't determine code-docker-internal's subnet (ROUTER_INTERNAL_SUBNET unset and auto-detection failed) - skipping the deny" >&2
-            export NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE=""
+        fi
+        ;;
+esac
+
+# ROUTER_NGINX_DENY_INTERNAL_MANAGER (default "true") - same deny, applied to
+# every location that proxies to router-manager's own socket: the shared
+# hostname's /router/ (nginx.default.conf) and both locations of the
+# dedicated ROUTER_MANAGER_HOSTS server block below. The dedicated block is
+# selected by Host header alone, so leaving it out would leave the whole
+# admin API reachable from inside code-docker with a one-line `curl -H
+# 'Host: router.example.com'` - the deny has to cover both or it covers
+# neither.
+#
+# Why deny at all: router-manager's admin API is what edits the netgate
+# egress rules, DNS resolver, inbound forwards and tinyauth users, i.e. the
+# fence that exists *because* code-docker's own contents aren't trusted.
+# Nothing inside code-docker-internal is a legitimate caller - webmanager's
+# router tabs are an <iframe> and browser fetches, which arrive from outside
+# (see nginx.default.conf's own /router/ comment and the 2026-09-07 security
+# review, finding C2). "false" is the escape hatch for a deployment whose
+# only route to router really is from inside that subnet; it puts the admin
+# API back within reach of anything running in code-docker, so pair it with
+# ROUTER_MANAGER_AUTH_PASSWORD_HASH at minimum.
+case "${ROUTER_NGINX_DENY_INTERNAL_MANAGER:-true}" in
+    false)
+        export NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE=""
+        ;;
+    *)
+        export NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE="$deny_internal_directive"
+        if [ -z "$deny_internal_directive" ]; then
+            echo "nginx-service: ROUTER_NGINX_DENY_INTERNAL_MANAGER is on but couldn't determine code-docker-internal's subnet (ROUTER_INTERNAL_SUBNET unset and auto-detection failed) - router-manager's admin API stays reachable from inside code-docker. Set ROUTER_INTERNAL_SUBNET explicitly, and make sure ROUTER_MANAGER_AUTH_PASSWORD_HASH (or the in-app password) is configured" >&2
         fi
         ;;
 esac
@@ -157,6 +212,11 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
         # (router/config/nginx/nginx.default.conf), even though the SPA
         # itself is served from this domain's root below, not /router/.
         location /router/ {
+            # Same internal-source deny as the shared hostname's own
+            # /router/ location - this block is picked by Host header alone,
+            # so without it an internal caller just sets the header. See
+            # ROUTER_NGINX_DENY_INTERNAL_MANAGER above.
+            $NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE
             proxy_pass http://unix:/run/router-manager.sock:/;
             proxy_set_header Host \$host;
             # Same WebSocket upgrade the shared hostname's own /router/
@@ -179,6 +239,12 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
         # root, so router-manager is reachable as a real standalone site
         # without needing the /router/ segment at all.
         location / {
+            # Denied from code-docker-internal for the same reason as
+            # /router/ above - and this one matters just as much: passing
+            # the path through unstripped means /api/netgate/outbound at
+            # this domain's root reaches router-manager's admin API
+            # directly, SPA or no SPA.
+            $NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE
             proxy_pass http://unix:/run/router-manager.sock:/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
@@ -467,6 +533,6 @@ done
 export NGINX_VHOST_SERVER_BLOCKS="$vhost_blocks"
 
 generated_config=/run/nginx.generated.conf
-envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK} ${NGINX_VHOST_SERVER_BLOCKS}' < "$nginx_config" > "$generated_config"
+envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK} ${NGINX_VHOST_SERVER_BLOCKS}' < "$nginx_config" > "$generated_config"
 
 exec nginx -g "daemon off;" -c "$generated_config"
