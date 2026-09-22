@@ -467,7 +467,7 @@ export function DevProxy() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="myapp"
-                pattern="[a-z0-9][a-z0-9-]{0,61}[a-z0-9]|[a-z0-9]"
+                pattern="[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]|[a-z0-9]"
                 required
               />
             </div>

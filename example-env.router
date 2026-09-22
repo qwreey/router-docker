@@ -99,7 +99,7 @@ ROUTER_ENV_VERSION=10
 #. Routes 대상으로 쓸 수 있습니다. 인프라 설정으로 고정해두는 값이라 계속
 #. 켜둬도 안전합니다(위 *_ALLOW_EXTERNAL_TARGETS와 달리 임시 디버그
 #. 우회용이 아님).
-#ROUTER_EXTRA_ALLOWED_TARGET_HOSTS= # 예: vnc-only,vnc-only2
+#ROUTER_EXTRA_ALLOWED_TARGET_HOSTS= # 예: roblox-studio-vnc,chrome-vnc
 
 #. --- DNS 블록리스트 (dnsmasq builtin 소스) ---
 #. 둘 다 컨테이너 (재)생성 시에만 반영됩니다 - `docker compose restart`로는

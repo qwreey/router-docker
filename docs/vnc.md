@@ -23,7 +23,7 @@ router가 이 기능을 갖는 게 자연스러운 이유는 이미 code-docker�
 **`rfb` (router 중계) — 기본값.** router-manager가 이 제약을 자기 자신의
 코드로 우회합니다: noVNC 뷰어를 router-manager 프로세스 안에서 직접
 서비스하고, 브라우저의 WebSocket을 대상의 **raw RFB 포트**(네이티브 클라이언트가
-붙는 것과 같은 포트, 예: `vnc-only:5900`)에 직접 브리지합니다.
+붙는 것과 같은 포트, 예: `roblox-studio-vnc:5900`)에 직접 브리지합니다.
 
 ```
 브라우저 <─HTTP/WS─> router-manager (noVNC 뷰어 + RFB 브리지)
@@ -80,8 +80,8 @@ Route를 아예 만들지 않으므로 App Routes 탭에는 아무것도 나타�
   불가)을 따릅니다. 이미 같은 이름의 App Route가 있으면 거부됩니다 — 남의
   앱을 가로채지 않기 위한 의도된 동작입니다.
 - **대상 (host:port)** — 어떤 포트를 넣어야 하는지가 백엔드에 따라
-  **정반대**입니다. `rfb`는 raw RFB 포트(보통 `5900`, 예: `vnc-only:5900`)를,
-  `novnc`는 웹 VNC 포트(보통 `6080`, 예: `vnc-only:6080`)를 원합니다. 어느
+  **정반대**입니다. `rfb`는 raw RFB 포트(보통 `5900`, 예: `roblox-studio-vnc:5900`)를,
+  `novnc`는 웹 VNC 포트(보통 `6080`, 예: `roblox-studio-vnc:6080`)를 원합니다. 어느
   쪽이든 compose 서비스 호스트네임이나 네트워크 별칭을 쓰세요. 선택한
   백엔드에 안 맞아 보이는 포트를 넣으면 폼이 경고를 띄웁니다.
 - **뷰어 백엔드** — `rfb`(RFB, router 중계) 또는 `novnc`(대상이 서비스하는
@@ -114,7 +114,7 @@ sibling 프로젝트의 컨테이너를 대상으로 삼으려면 `.env.router`�
 `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`에 그 호스트를 추가해야 합니다:
 
 ```sh
-ROUTER_EXTRA_ALLOWED_TARGET_HOSTS=vnc-only
+ROUTER_EXTRA_ALLOWED_TARGET_HOSTS=roblox-studio-vnc
 ```
 
 router 자신을 가리키는 주소(`localhost`, `router`, `forward` 등)는 이

@@ -119,7 +119,7 @@ export function TargetDialog({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="studio-vnc"
-            pattern="[a-z0-9][a-z0-9-]{0,61}[a-z0-9]|[a-z0-9]"
+            pattern="[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]|[a-z0-9]"
             required
           />
           <p className="vnc-hint">
@@ -133,7 +133,7 @@ export function TargetDialog({
             id="vnc-target"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            placeholder="vnc-only:6080"
+            placeholder="roblox-studio-vnc:6080"
             required
           />
           {portLooksWrong(backend, target) === 'rfb' && (
@@ -153,7 +153,7 @@ export function TargetDialog({
           {looksUnreachable(target) && (
             <p className="vnc-hint vnc-hint-warn">
               <code>{target || '(비어있음)'}</code>은(는) router 컨테이너 자신을 가리켜 대상 컨테이너에 닿지
-              않습니다 — <code>vnc-only:6080</code>처럼 compose 서비스 호스트네임이나 네트워크 별칭을 쓰세요.
+              않습니다 — <code>roblox-studio-vnc:6080</code>처럼 compose 서비스 호스트네임이나 네트워크 별칭을 쓰세요.
             </p>
           )}
         </div>

@@ -47,7 +47,7 @@ export interface AppRouteInfo {
 
 // Mirrors router/backend/internal/vnc.Target — one registered VNC target.
 // target is the target's *web* VNC front end (websockify's HTTP+WebSocket
-// port, e.g. "vnc-only:6080"), never its raw RFB port: router's Caddy is
+// port, e.g. "roblox-studio-vnc:6080"), never its raw RFB port: router's Caddy is
 // stock (HTTP/WS only) and can't carry raw RFB at all. name doubles as the
 // App Route name that actually carries it, hence the same RFC1123-label
 // constraint AppRoute.name has.
