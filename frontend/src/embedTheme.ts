@@ -71,3 +71,44 @@ export function notifyEmbedReady() {
   if (window.parent === window) return
   window.parent.postMessage({ source: MESSAGE_SOURCE, type: 'ready' }, '*')
 }
+
+// The embedding parent's origin, as RouterFrame.tsx passes it in ?origin=
+// (see useViewerOrigin.ts for its other use). null outside an iframe or
+// when absent/unparseable - and then nothing below talks to the parent.
+function parentOrigin(): string | null {
+  if (window.parent === window) return null
+  const raw = new URLSearchParams(window.location.search).get('origin')
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+// Tells the embedding parent something about this page's state. Unlike
+// notifyEmbedReady this carries data only the parent should get (which VNC
+// targets are open), so it is addressed to the origin the parent itself
+// declared instead of '*'.
+export function notifyEmbedParent(type: string, payload: Record<string, unknown>) {
+  const origin = parentOrigin()
+  if (!origin) return
+  window.parent.postMessage({ source: MESSAGE_SOURCE, type, ...payload }, origin)
+}
+
+// Requests from the embedding parent (e.g. "open this VNC target"). Only
+// the direct parent window is listened to - the one that framed this page
+// and declared its origin - never an arbitrary sender. Returns a cleanup
+// function.
+export function listenForEmbedParent(type: string, handler: (data: Record<string, unknown>) => void): () => void {
+  const origin = parentOrigin()
+  function onMessage(event: MessageEvent) {
+    if (!origin || event.source !== window.parent || event.origin !== origin) return
+    const data = event.data
+    if (!data || typeof data !== 'object' || data.source !== MESSAGE_SOURCE || data.type !== type) return
+    handler(data as Record<string, unknown>)
+  }
+  window.addEventListener('message', onMessage)
+  return () => window.removeEventListener('message', onMessage)
+}

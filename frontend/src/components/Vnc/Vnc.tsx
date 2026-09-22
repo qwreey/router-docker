@@ -12,6 +12,7 @@ import { useAuthStatus } from '../common/useAuthStatus'
 import { useVncClients } from './useVncClients'
 import { VncClientsBadge, VncClientsPanel } from './VncClientsPanel'
 import { HOME_TAB, VncTabs, tabLabel } from './VncTabs'
+import { listenForEmbedParent, notifyEmbedParent } from '../../embedTheme'
 import './Vnc.css'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -117,6 +118,9 @@ export function Vnc() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [tabs, setTabsState] = useState<TabState>(loadTabs)
+  // The last loaded target list, for the parent-message handler below
+  // (registered once, so it can't read the state directly).
+  const targetsRef = useRef<VncTargetInfo[] | null>(null)
   // Which target's "연결된 클라이언트" row is expanded, if any.
   const [expandedClients, setExpandedClients] = useState<string | null>(null)
   const { clients: vncClients, refresh: refreshVncClients } = useVncClients(targets.map((t) => t.name))
@@ -159,6 +163,27 @@ export function Vnc() {
       const active = prev.active !== name ? prev.active : (open[index - 1] ?? open[index] ?? HOME_TAB)
       return { open, active }
     })
+
+  // The embedding parent (webmanager's RouterFrame) can open a target as a
+  // tab - its own ?target= deep link, or a code-server view asking for one -
+  // and is told which tabs are open, so it can put the active one in its
+  // own URL and a host can tell an already-open target from a new one.
+  useEffect(
+    () =>
+      listenForEmbedParent('vnc-open', (data) => {
+        if (typeof data.name !== 'string' || !data.name) return
+        // Before the first load there's nothing to check against; load()
+        // drops an unknown name then, same as a stale restored tab.
+        if (targetsRef.current && !targetsRef.current.some((t) => t.name === data.name)) return
+        openTab(data.name)
+      }),
+    // openTab only calls the stable setTabs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  useEffect(() => {
+    notifyEmbedParent('vnc-state', { open: tabs.open, active: tabs.active === HOME_TAB ? null : tabs.active })
+  }, [tabs])
 
   // Unlock from *this* page, not "go find the sidebar": when this page is
   // the <iframe> inside webmanager's VNC tab, the only sidebar the user can
@@ -293,6 +318,7 @@ export function Vnc() {
     try {
       const data = await api.get<VncTargetsResponse>('/targets')
       setTargets(data.targets)
+      targetsRef.current = data.targets
       setBackends(data.backends)
       setError(null)
       // A tab restored from storage (or deep-linked) for a target that no
