@@ -12,7 +12,7 @@ import { useAuthStatus } from '../common/useAuthStatus'
 import { useVncClients } from './useVncClients'
 import { VncClientsBadge, VncClientsPanel } from './VncClientsPanel'
 import { HOME_TAB, VncTabs, tabLabel } from './VncTabs'
-import { listenForEmbedParent, notifyEmbedParent } from '../../embedTheme'
+import { notifyEmbedParent } from '../../embedTheme'
 import './Vnc.css'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -47,7 +47,20 @@ interface TabState {
   active: string
 }
 
+// ?mode=host: something outside this page owns the tabs - the code-server
+// extension, where each target is its own editor tab (webmanager passes this
+// on when it is embedded there). The page then shows exactly one thing: the
+// ?target= viewer, or with no target the list, whose "열기" asks the parent
+// to open that target rather than opening it here. Nothing is persisted:
+// each editor tab restores itself from its own URL, and a shared stored set
+// would make every view reopen every target.
+const HOST_MODE = new URLSearchParams(window.location.search).get('mode') === 'host'
+
 function loadTabs(): TabState {
+  if (HOST_MODE) {
+    const target = new URLSearchParams(window.location.search).get('target')
+    return target ? { open: [target], active: target } : { open: [], active: HOME_TAB }
+  }
   let state: TabState = { open: [], active: HOME_TAB }
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(TABS_KEY) || 'null')
@@ -67,6 +80,7 @@ function loadTabs(): TabState {
 }
 
 function saveTabs(state: TabState) {
+  if (HOST_MODE) return
   try {
     localStorage.setItem(TABS_KEY, JSON.stringify(state))
   } catch {
@@ -118,9 +132,6 @@ export function Vnc() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [tabs, setTabsState] = useState<TabState>(loadTabs)
-  // The last loaded target list, for the parent-message handler below
-  // (registered once, so it can't read the state directly).
-  const targetsRef = useRef<VncTargetInfo[] | null>(null)
   // Which target's "연결된 클라이언트" row is expanded, if any.
   const [expandedClients, setExpandedClients] = useState<string | null>(null)
   const { clients: vncClients, refresh: refreshVncClients } = useVncClients(targets.map((t) => t.name))
@@ -150,7 +161,9 @@ export function Vnc() {
   }, [])
 
   const openTab = (name: string) =>
-    setTabs((prev) => ({ open: prev.open.includes(name) ? prev.open : [...prev.open, name], active: name }))
+    HOST_MODE
+      ? notifyEmbedParent('vnc-open-request', { name })
+      : setTabs((prev) => ({ open: prev.open.includes(name) ? prev.open : [...prev.open, name], active: name }))
 
   // Closing unmounts the viewer's iframe, which is what closes its
   // WebSocket - there is no "keep it running" for a live screen. The tab to
@@ -164,23 +177,8 @@ export function Vnc() {
       return { open, active }
     })
 
-  // The embedding parent (webmanager's RouterFrame) can open a target as a
-  // tab - its own ?target= deep link, or a code-server view asking for one -
-  // and is told which tabs are open, so it can put the active one in its
-  // own URL and a host can tell an already-open target from a new one.
-  useEffect(
-    () =>
-      listenForEmbedParent('vnc-open', (data) => {
-        if (typeof data.name !== 'string' || !data.name) return
-        // Before the first load there's nothing to check against; load()
-        // drops an unknown name then, same as a stale restored tab.
-        if (targetsRef.current && !targetsRef.current.some((t) => t.name === data.name)) return
-        openTab(data.name)
-      }),
-    // openTab only calls the stable setTabs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  )
+  // The embedding parent (webmanager's RouterFrame) is told which tabs are
+  // open and which is showing, so it can put the active one in its own URL.
   useEffect(() => {
     notifyEmbedParent('vnc-state', { open: tabs.open, active: tabs.active === HOME_TAB ? null : tabs.active })
   }, [tabs])
@@ -318,7 +316,9 @@ export function Vnc() {
     try {
       const data = await api.get<VncTargetsResponse>('/targets')
       setTargets(data.targets)
-      targetsRef.current = data.targets
+      // Names and labels only - what a host needs to offer a pick list and
+      // title its tabs, without being able to reach this API itself.
+      notifyEmbedParent('vnc-targets', { targets: data.targets.map((t) => ({ name: t.name, label: t.label })) })
       setBackends(data.backends)
       setError(null)
       // A tab restored from storage (or deep-linked) for a target that no
@@ -468,17 +468,19 @@ export function Vnc() {
 
   return (
     <section className="vnc-section" ref={sectionRef}>
-      <VncTabs
-        open={tabs.open}
-        active={tabs.active}
-        targets={targets}
-        fullscreen={fullscreen}
-        onSelect={(name) => setTabs((prev) => ({ ...prev, active: name }))}
-        onClose={closeTab}
-        onReorder={(open) => setTabs((prev) => ({ ...prev, open }))}
-        onFullscreen={handleFullscreen}
-        onMoveToWindow={() => activeInfo && openInNewWindow(activeInfo)}
-      />
+      {!HOST_MODE && (
+        <VncTabs
+          open={tabs.open}
+          active={tabs.active}
+          targets={targets}
+          fullscreen={fullscreen}
+          onSelect={(name) => setTabs((prev) => ({ ...prev, active: name }))}
+          onClose={closeTab}
+          onReorder={(open) => setTabs((prev) => ({ ...prev, open }))}
+          onFullscreen={handleFullscreen}
+          onMoveToWindow={() => activeInfo && openInNewWindow(activeInfo)}
+        />
+      )}
       {/* Every pane is laid out at the same size and stacked; only the active
           one is visible. Inactive viewers stay connected (switching tabs is
           not closing them) and, just as importantly, keep their size - with
@@ -576,7 +578,7 @@ export function Vnc() {
                                 disabled={info.routeMissing}
                                 onClick={() => openTab(info.name)}
                               >
-                                {isOpen ? '탭으로 이동' : '열기'}
+                                {isOpen && !HOST_MODE ? '탭으로 이동' : '열기'}
                               </button>{' '}
                               {/* Deliberately available without opening a tab first: a
                                   full-size desktop is often the *only* way someone

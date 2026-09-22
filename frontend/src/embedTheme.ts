@@ -96,19 +96,3 @@ export function notifyEmbedParent(type: string, payload: Record<string, unknown>
   if (!origin) return
   window.parent.postMessage({ source: MESSAGE_SOURCE, type, ...payload }, origin)
 }
-
-// Requests from the embedding parent (e.g. "open this VNC target"). Only
-// the direct parent window is listened to - the one that framed this page
-// and declared its origin - never an arbitrary sender. Returns a cleanup
-// function.
-export function listenForEmbedParent(type: string, handler: (data: Record<string, unknown>) => void): () => void {
-  const origin = parentOrigin()
-  function onMessage(event: MessageEvent) {
-    if (!origin || event.source !== window.parent || event.origin !== origin) return
-    const data = event.data
-    if (!data || typeof data !== 'object' || data.source !== MESSAGE_SOURCE || data.type !== type) return
-    handler(data as Record<string, unknown>)
-  }
-  window.addEventListener('message', onMessage)
-  return () => window.removeEventListener('message', onMessage)
-}
