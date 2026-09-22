@@ -101,86 +101,227 @@
   color: var(--danger, #d9534f);
 }
 
-.vnc-viewer {
-  margin-top: 1rem;
+/* Full-bleed, same technique as webmanager's Terminal.css .terminal-section:
+   a negative margin cancels the surrounding padding so the tab bar and the
+   viewers get the whole content area. Both hosts this renders in use the
+   same padding (App.css's .router-app-content standalone and
+   .router-app--embed inside webmanager, three breakpoints each, kept equal
+   on purpose), so one set of values covers both. Height comes from App.css's
+   --fill classes, which make the content area a flex column while this tab
+   shows: the section takes what's left, so a banner above it (localhost
+   warning, env version) pushes it down instead of being drawn over. Only
+   when nothing is above it does it also reach up into the top padding. */
+.vnc-section {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -2.5rem -2rem;
 }
 
-.vnc-viewer-header {
+.vnc-host:first-child .vnc-section {
+  margin-top: -2rem;
+}
+
+@media (max-width: 720px) {
+  .vnc-section {
+    margin: 0 -1.25rem -1.25rem;
+  }
+
+  .vnc-host:first-child .vnc-section {
+    margin-top: -1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .vnc-section {
+    margin: 0 -0.85rem -1rem;
+  }
+
+  .vnc-host:first-child .vnc-section {
+    margin-top: -1rem;
+  }
+}
+
+/* Fullscreen fallback (Vnc.tsx's requestOwnFullscreen) takes the whole
+   section, tab bar included, so the way back out stays on screen. */
+.vnc-section:fullscreen {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* Tab bar - a visual copy of webmanager's .terminal-tabbar (hand-kept, see
+   VncTabs.tsx), minus rename/pin. */
+.vnc-tabbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.3rem;
+  flex: none;
+  padding: 0.5rem 0.6rem 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.vnc-viewer-title {
+.vnc-tab-list {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
 }
 
-.vnc-viewer-title code {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+.vnc-tab-list::-webkit-scrollbar {
+  display: none;
 }
 
-.vnc-viewer-actions {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
+.vnc-tab-list > * {
+  flex: none;
 }
 
-/* The icon-bearing buttons here are <a> as well as <button> (the 새 탭
-   link), so the flex alignment lives on the class rather than on a
-   button-only selector. */
-.vnc-viewer-actions .btn {
+.vnc-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--bg);
+  color: var(--text-muted);
 }
 
-/* A remote desktop has no useful "natural" height to grow to, so the frame
-   gets an explicit one: tall enough to be usable, capped by viewport height
-   so the whole page never turns into a scroll trap on a short window. What
-   the target does with that size is per-target now (Target.ResizeMode - ask
-   the remote desktop to actually become this size, or just scale into it). */
+/* The list tab has no close button, so it gets the right padding back. */
+.vnc-tab:first-child {
+  padding-right: 0.7rem;
+}
+
+.vnc-tab-active {
+  color: var(--text-heading);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.vnc-tab-drag-over {
+  outline: 2px dashed var(--accent-border, var(--accent));
+  outline-offset: -2px;
+}
+
+.vnc-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.vnc-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  padding: 0.15rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius);
+  opacity: 0.55;
+}
+
+.vnc-tab-close:hover {
+  opacity: 1;
+  background: var(--color-gray-bg);
+}
+
+.vnc-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: none;
+  padding-bottom: 0.2rem;
+}
+
+.vnc-tab-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: none;
+  padding: 0.25rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.vnc-tab-action:hover {
+  color: var(--text);
+  background: var(--color-gray-bg);
+}
+
+/* Every pane is stacked at the same size; the inactive ones are hidden
+   with visibility rather than display so a connected viewer keeps its
+   layout size (see Vnc.tsx). */
+.vnc-panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.vnc-pane {
+  position: absolute;
+  inset: 0;
+}
+
+.vnc-pane-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The list is an ordinary document-style page, so it gets back the padding
+   the section cancelled, and scrolls on its own. */
+.vnc-home {
+  overflow-y: auto;
+  padding: 1.5rem 2.5rem 2rem;
+}
+
+@media (max-width: 720px) {
+  .vnc-home {
+    padding: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .vnc-home {
+    padding: 1rem 0.85rem;
+  }
+}
+
+.vnc-pane-notice {
+  padding: 1.5rem;
+}
+
 .vnc-viewer-frame {
   width: 100%;
-  height: min(70vh, 720px);
-  min-height: 320px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  height: 100%;
+  border: none;
   background: #000;
   display: block;
 }
 
-/* On the delegated fullscreen path (see Vnc.tsx's Viewer) the element that
-   goes fullscreen lives inside this iframe, which makes the iframe itself a
-   fullscreen ancestor and match :fullscreen - without this it would keep its
-   bordered/rounded box inside the fullscreen viewport. */
+/* On the delegated fullscreen path the element that goes fullscreen lives
+   inside this iframe, which makes the iframe itself a fullscreen ancestor
+   and match :fullscreen. */
 .vnc-viewer-frame:fullscreen {
   height: 100%;
-  border: none;
-  border-radius: 0;
-}
-
-/* The fallback path fullscreens the whole card instead, so the header - and
-   with it the button that exits again - stays reachable. The card is a plain
-   flex column otherwise, so it has to be told to fill the viewport and hand
-   the leftover height to the frame. */
-.vnc-viewer:fullscreen {
-  height: 100%;
-  margin-top: 0;
-  border-radius: 0;
-  background: var(--surface);
-}
-
-.vnc-viewer:fullscreen .vnc-viewer-frame {
-  flex: 1;
-  height: auto;
-  max-height: none;
 }

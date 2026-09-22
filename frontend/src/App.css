@@ -110,3 +110,25 @@
     padding: 1rem 0.85rem;
   }
 }
+
+/* A tab that fills the whole content area (VNC) rather than scrolling a
+   document: the content area becomes a flex column so that tab's section
+   can take whatever height is left under any banners above it, instead of
+   assuming it's the only thing there. */
+.router-app-content--fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.router-app--embed.router-app--fill {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.router-app--fill .router-app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

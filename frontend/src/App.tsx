@@ -83,6 +83,12 @@ function App() {
   // (no sidebar renders at all when embedded). Same pattern as webmanager's
   // own App.tsx hamburger button.
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // The VNC tab stays mounted once visited, so leaving it for another tab
+  // doesn't disconnect the viewers open there - only closing a viewer's own
+  // tab does (see Vnc.tsx). Hidden with display:none while away; the
+  // Dockerfile's noVNC patch is what makes that safe (no 0x0 desktop).
+  const [vncVisited, setVncVisited] = useState(tab === 'vnc')
+  if (tab === 'vnc' && !vncVisited) setVncVisited(true)
 
   // Embed mode keeps the existing ?tab= query-string contract with
   // RouterFrame.tsx on the webmanager side instead (see the component doc
@@ -117,7 +123,13 @@ function App() {
       <EnvVersionBanner />
       {tab === 'dev-proxy' && <DevProxy />}
       {tab === 'app-routes' && <AppRoutes />}
-      {tab === 'vnc' && <Vnc />}
+      {vncVisited && (
+        // display:contents so the section is laid out as a direct flex item
+        // of the content area (see the --fill classes in App.css).
+        <div className="vnc-host" style={{ display: tab === 'vnc' ? 'contents' : 'none' }}>
+          <Vnc />
+        </div>
+      )}
       {tab === 'tailscale' && <Tailscale />}
       {tab === 'dns' && <Dns />}
       {tab === 'net' && <NetManagement />}
@@ -145,7 +157,7 @@ function App() {
 
   if (embed) {
     return (
-      <div className="router-app router-app--embed">
+      <div className={`router-app router-app--embed${tab === 'vnc' ? ' router-app--fill' : ''}`}>
         <main className="router-app-main">{content}</main>
         <RouterUnlockModalHost />
       </div>
@@ -172,7 +184,7 @@ function App() {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <main className="router-app-content">{content}</main>
+      <main className={`router-app-content${tab === 'vnc' ? ' router-app-content--fill' : ''}`}>{content}</main>
       <RouterUnlockModalHost />
     </div>
   )

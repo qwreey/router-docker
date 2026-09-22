@@ -389,8 +389,17 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   **delegates to noVNC's own fullscreen button** when the iframe is same-origin, rather
   than fullscreening the iframe from outside: the outside path never sets
   `document.fullscreenElement` *inside* the frame, so noVNC's own button stayed stale and
-  took two presses to escape. The cross-origin fallback fullscreens the whole viewer card
-  (not the bare iframe) so the header's own exit button stays on screen.
+  took two presses to escape. The cross-origin fallback fullscreens the whole VNC section
+  (not the bare iframe) so the tab bar's own exit button stays on screen.
+  2026-09-22: the tab is a full-bleed multi-viewer shell (`VncTabs.tsx`, a hand-kept
+  visual copy of webmanager's TerminalTabs minus rename/pin): a fixed "대상 목록" tab plus
+  one tab per open target, dedup by target name, close = disconnect, open set persisted in
+  localStorage + `?target=` deep link. Inactive viewers are stacked with
+  `visibility:hidden`, never `display:none`, so a `remote`-resize target isn't resized on
+  every tab switch; `App.tsx` also keeps `<Vnc>` mounted once visited so leaving for another
+  router tab doesn't disconnect. The shell lives here rather than in webmanager on purpose —
+  webmanager can't read this API across a ROUTER_MANAGER_HOSTS origin, see code-docker's
+  `.claude/backlog/vnc-tab-rework.md`.
 - **vhost** (`ROUTER_VHOST_<NAME>="<host>[,<host>...]=<upstream>[:port]"`,
   `config/nginx/nginx-service.default.sh`, docs `docs/vhost.md`) — the third way to expose
   something, alongside App Routes (`/app/<name>/` on the shared hostname) and Dev Proxy
