@@ -231,6 +231,14 @@ export function Vnc() {
   function openInNewWindow(info: VncTargetInfo) {
     const { origin } = resolveViewerOrigin(info)
     if (!origin) return
+    // A host (code-server's webview) sandboxes its frames without
+    // allow-popups, so window.open is refused there outright. The host opens
+    // the window instead - and does the same handoff, closing its own view
+    // of this target first.
+    if (HOST_MODE) {
+      notifyEmbedParent('vnc-open-window', { name: info.name, url: origin + info.viewerPath })
+      return
+    }
     const win = window.open('about:blank', '_blank')
     if (!win) {
       setError('팝업이 차단되어 새 창을 열지 못했습니다 - 이 사이트의 팝업을 허용해주세요.')
