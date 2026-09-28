@@ -86,7 +86,7 @@ export function createApiClient(prefix: string, opts: { skipUnlockRetry?: boolea
     return `/${prefix}${path}`
   }
 
-  async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  async function request<T>(path: string, init?: RequestInit, retried = false, prompt = true): Promise<T> {
     const res = await fetch(apiUrl(path), init)
 
     // Only ever true for the auth client's own POST /unlock (it's the only
@@ -112,7 +112,7 @@ export function createApiClient(prefix: string, opts: { skipUnlockRetry?: boolea
     }
 
     if (!res.ok) {
-      if (res.status === 401 && !retried && unlockPrompter && !opts.skipUnlockRetry) {
+      if (res.status === 401 && prompt && !retried && unlockPrompter && !opts.skipUnlockRetry) {
         let unlocked = false
         try {
           await unlockPrompter()
@@ -140,6 +140,11 @@ export function createApiClient(prefix: string, opts: { skipUnlockRetry?: boolea
 
   const api = {
     get: <T>(path: string) => request<T>(path),
+    // A GET made on a timer, not by the user: a 401 just throws instead of
+    // popping the password prompt. Unlike webmanager's client there's no
+    // cooldown after a dismissed prompt here, so a gated poll through get
+    // would reopen the modal on every tick for as long as it stays locked.
+    poll: <T>(path: string) => request<T>(path, undefined, false, false),
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', ...withJsonBody(body) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', ...withJsonBody(body) }),
     del: <T>(path: string, body?: unknown) => request<T>(path, { method: 'DELETE', ...withJsonBody(body) }),

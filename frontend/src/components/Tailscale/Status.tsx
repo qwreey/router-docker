@@ -37,10 +37,15 @@ export function Status() {
   const [starting, setStarting] = useState(false)
   const [reauthing, setReauthing] = useState(false)
 
-  const load = useCallback(async () => {
+  // quiet: the needsLogin interval below. /status is gated, and a lock that
+  // lands while a login is pending must not reopen the password prompt on
+  // every tick (api.poll) - the first load and the refresh button still may.
+  const load = useCallback(async (quiet = false) => {
     setLoading(true)
     try {
-      const res = await api.get<TailscaleStatusResponse>('/status')
+      const res = quiet
+        ? await api.poll<TailscaleStatusResponse>('/status')
+        : await api.get<TailscaleStatusResponse>('/status')
       setData(res)
       setError(null)
     } catch (e) {
@@ -70,7 +75,7 @@ export function Status() {
   // the login as resolved.
   useEffect(() => {
     if (!needsLogin) return
-    const timer = setInterval(load, AUTH_POLL_INTERVAL_MS)
+    const timer = setInterval(() => load(true), AUTH_POLL_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [needsLogin, load])
 
@@ -122,7 +127,7 @@ export function Status() {
               {reauthing ? '재인증 시도하는 중...' : '재인증'}
             </button>
           )}{' '}
-          <button type="button" className="btn btn-secondary btn-small" onClick={load} disabled={loading}>
+          <button type="button" className="btn btn-secondary btn-small" onClick={() => void load()} disabled={loading}>
             {loading ? '불러오는 중...' : '새로고침'}
           </button>
         </div>
