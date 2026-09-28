@@ -355,8 +355,9 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   connects.
 
   Reaching a sibling project's container still needs that host in
-  `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS` (same `targetguard` allowlist App Routes uses —
-  no separate one), and `handleVncSocket` re-checks it per connection rather than trusting
+  `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS` (same `targetguard` allowlist App Routes, Dev
+  Proxy, netgate forwards and tailscale publish use — no separate one; the last two have
+  no allow-external opt-out, and dind's Docker API ports are refused everywhere), and `handleVncSocket` re-checks it per connection rather than trusting
   what was allowed at save time. For a `novnc`-backend target the viewer's iframe `src` is
   origin-sensitive and can't just use
   `window.location.origin`: `/app/` is served only on the *shared* hostname's nginx block,

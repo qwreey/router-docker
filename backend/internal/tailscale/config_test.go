@@ -183,3 +183,21 @@ func TestEffectiveLoginServerDefaultsEmpty(t *testing.T) {
 		t.Fatalf("EffectiveLoginServer() = %q, want empty (no default)", got)
 	}
 }
+
+// TestAddPublishUsesTargetAllowlist is the regression test for the
+// 2026-09-16 audit's F17: a publish with target_host dind put the
+// unauthenticated Docker API on the whole tailnet.
+func TestAddPublishUsesTargetAllowlist(t *testing.T) {
+	for _, p := range []Publish{
+		{Name: "docker", TailscalePort: 2375, TargetHost: "dind", LocalPort: 2375},
+		{Name: "other", TailscalePort: 443, TargetHost: "some-other-host", LocalPort: 80},
+		{Name: "loop", TailscalePort: 443, TargetHost: "127.0.0.2", LocalPort: 80},
+	} {
+		if _, err := AddPublish(t.TempDir()+"/config.yaml", p); err == nil {
+			t.Errorf("AddPublish(%s:%d) = nil, want refusal", p.TargetHost, p.LocalPort)
+		}
+	}
+	if _, err := AddPublish(t.TempDir()+"/config.yaml", Publish{Name: "ok", TailscalePort: 443, TargetHost: "dind", LocalPort: 8080}); err != nil {
+		t.Errorf("AddPublish(dind:8080) = %v, want ok", err)
+	}
+}

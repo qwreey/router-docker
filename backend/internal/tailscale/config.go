@@ -20,7 +20,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strings"
+	"strconv"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -70,8 +70,23 @@ func validateHost(field, host string) error {
 	if host == "" || !hostRe.MatchString(host) {
 		return fmt.Errorf("%w: %s must be a plain hostname or IPv4 address", ErrValidation, field)
 	}
-	if targetguard.SelfHosts[strings.ToLower(host)] {
+	if targetguard.IsSelfHost(host) {
 		return fmt.Errorf("%w: %s %q would point back at router itself", ErrValidation, field, host)
+	}
+	return nil
+}
+
+// publishAllowedHosts is the same allowlist Dev Proxy/App Routes use: a
+// publish puts TargetHost on the whole tailnet, so it must be a service a user
+// is meant to expose, never whatever router can reach.
+var publishAllowedHosts = targetguard.DefaultAllowedHosts()
+
+func validatePublishTarget(p Publish) error {
+	if err := validateHost("targetHost", p.TargetHost); err != nil {
+		return err
+	}
+	if err := targetguard.ValidateHost(p.TargetHost, strconv.Itoa(p.LocalPort), publishAllowedHosts, "", "tailscale publish"); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	return nil
 }
@@ -378,7 +393,7 @@ func AddPublish(path string, p Publish) (Publish, error) {
 	if p.Name == "" {
 		return Publish{}, fmt.Errorf("%w: name is required", ErrValidation)
 	}
-	if err := validateHost("targetHost", p.TargetHost); err != nil {
+	if err := validatePublishTarget(p); err != nil {
 		return Publish{}, err
 	}
 	if err := validatePort("tailscalePort", p.TailscalePort); err != nil {
@@ -418,7 +433,7 @@ func UpdatePublish(path, name string, p Publish) (Publish, error) {
 	if p.TargetHost == "" {
 		p.TargetHost = "code-docker"
 	}
-	if err := validateHost("targetHost", p.TargetHost); err != nil {
+	if err := validatePublishTarget(p); err != nil {
 		return Publish{}, err
 	}
 	if err := validatePort("tailscalePort", p.TailscalePort); err != nil {

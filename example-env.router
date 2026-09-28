@@ -96,7 +96,8 @@ ROUTER_ENV_VERSION=11
 #. EXTRA_INCLUDE로 자기 컨테이너를 code-docker-internal에 붙이는 경우
 #. (root CLAUDE.md의 EXTRA_INCLUDE/roblox-studio-docker 통합 참고), 그
 #. 컨테이너의 별칭을 여기 추가하면 router 코드 수정 없이 Dev Proxy/App
-#. Routes 대상으로 쓸 수 있습니다. 인프라 설정으로 고정해두는 값이라 계속
+#. Routes/VNC/Net 관리 포트포워딩/tailscale publish 대상으로 쓸 수 있습니다
+#. (dind의 Docker API 포트 2375/2376은 어떤 경우에도 대상이 될 수 없습니다). 인프라 설정으로 고정해두는 값이라 계속
 #. 켜둬도 안전합니다(위 *_ALLOW_EXTERNAL_TARGETS와 달리 임시 디버그
 #. 우회용이 아님).
 #ROUTER_EXTRA_ALLOWED_TARGET_HOSTS= # 예: roblox-studio-vnc,chrome-vnc

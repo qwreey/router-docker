@@ -184,3 +184,23 @@ func TestReplaceOutboundKeepsV4Backstop(t *testing.T) {
 		t.Fatalf("block 0.0.0.0/0 was refused: %v", err)
 	}
 }
+
+// TestAddForwardUsesTargetAllowlist is the regression test for the
+// 2026-09-16 audit's F17: forwards only checked the hostname's charset, so a
+// forward could publish router's own admin port or dind's Docker API on a
+// host port.
+func TestAddForwardUsesTargetAllowlist(t *testing.T) {
+	for _, f := range []Forward{
+		{HostPort: 8081, TargetHost: "router", TargetPort: 81},
+		{HostPort: 8082, TargetHost: "127.0.0.2", TargetPort: 81},
+		{HostPort: 2375, TargetHost: "dind", TargetPort: 2375},
+		{HostPort: 8083, TargetHost: "some-other-host", TargetPort: 80},
+	} {
+		if _, err := AddForward(t.TempDir()+"/config.yaml", f); !errors.Is(err, ErrValidation) {
+			t.Errorf("AddForward(%s:%d) = %v, want ErrValidation", f.TargetHost, f.TargetPort, err)
+		}
+	}
+	if _, err := AddForward(t.TempDir()+"/config.yaml", Forward{HostPort: 8080, TargetHost: "code-docker", TargetPort: 80}); err != nil {
+		t.Errorf("AddForward(code-docker:80) = %v, want ok", err)
+	}
+}

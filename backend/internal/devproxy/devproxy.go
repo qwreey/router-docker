@@ -159,10 +159,7 @@ func ValidateHost(host string) error {
 // lowest-trust container's own admin surface.
 // Extended at package init by targetguard.ExtraAllowedHostsEnv
 // (ROUTER_EXTRA_ALLOWED_TARGET_HOSTS) — see that const's own doc comment.
-var allowedTargetHosts = targetguard.WithExtraHosts(map[string]bool{
-	"code-docker": true,
-	"dind":        true,
-})
+var allowedTargetHosts = targetguard.DefaultAllowedHosts()
 
 // ValidateTarget checks target is a plain host:port with no whitespace or
 // Caddyfile syntax characters (braces, newlines) that could break out of

@@ -80,10 +80,7 @@ type Info struct {
 // block, targets exactly this).
 // Extended at package init by targetguard.ExtraAllowedHostsEnv
 // (ROUTER_EXTRA_ALLOWED_TARGET_HOSTS) — see that const's own doc comment.
-var allowedTargetHosts = targetguard.WithExtraHosts(map[string]bool{
-	"code-docker": true,
-	"dind":        true,
-})
+var allowedTargetHosts = targetguard.DefaultAllowedHosts()
 
 // ValidateTarget delegates to targetguard (shared with devproxy) for the
 // security-critical self-SSRF/self-host block, with App Routes' own

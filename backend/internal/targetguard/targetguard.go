@@ -31,6 +31,37 @@ var SelfHosts = map[string]bool{
 	"forward":   true,
 }
 
+// IsSelfHost reports whether host names router itself: a SelfHosts name, or
+// any loopback/unspecified IP literal in a spelling net.ParseIP understands
+// (127.0.0.2, ::ffff:127.0.0.1, 0.0.0.0 ...), not just the few listed.
+func IsSelfHost(host string) bool {
+	h := strings.ToLower(strings.Trim(host, "[]"))
+	if SelfHosts[h] {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+// deniedTargets are host:port pairs no feature may target even though the
+// host itself is allowed: dind's Docker API is unauthenticated and
+// privileged, so a route, forward or tailnet publish pointing at it hands
+// out root on the host. dind's other ports (containers it publishes) stay
+// fine targets.
+var deniedTargets = map[string]map[string]bool{
+	"dind": {"2375": true, "2376": true},
+}
+
+// DefaultAllowedHosts is the allowlist every feature starts from: the
+// code-docker-internal services a user legitimately points things at,
+// widened by ExtraAllowedHostsEnv.
+func DefaultAllowedHosts() map[string]bool {
+	return WithExtraHosts(map[string]bool{
+		"code-docker": true,
+		"dind":        true,
+	})
+}
+
 var targetRe = regexp.MustCompile(`^[a-zA-Z0-9_.:\[\]-]+$`)
 
 // ExtraAllowedHostsEnv widens both devproxy's and approutes' built-in
@@ -72,17 +103,26 @@ func Validate(target string, allowedHosts map[string]bool, allowExternalEnv, fea
 		return errors.New("target must be a plain host:port with no spaces or special characters")
 	}
 
-	host := target
-	if h, _, err := net.SplitHostPort(target); err == nil {
-		host = h
+	host, port := target, ""
+	if h, p, err := net.SplitHostPort(target); err == nil {
+		host, port = h, p
 	}
+	return ValidateHost(host, port, allowedHosts, allowExternalEnv, featureLabel)
+}
+
+// ValidateHost is Validate for callers that keep host and port apart (netgate
+// forwards, tailscale publish); the caller has already checked the charset.
+// allowExternalEnv "" means the feature has no opt-out of the allowlist.
+func ValidateHost(host, port string, allowedHosts map[string]bool, allowExternalEnv, featureLabel string) error {
 	host = strings.ToLower(host)
-
-	if SelfHosts[host] {
-		return fmt.Errorf("target %q would point back at router itself - not a valid %s target", target, featureLabel)
+	if IsSelfHost(host) {
+		return fmt.Errorf("target %q would point back at router itself - not a valid %s target", host, featureLabel)
+	}
+	if deniedTargets[host][port] {
+		return fmt.Errorf("target %s:%s is dind's unauthenticated Docker API - never a valid %s target", host, port, featureLabel)
 	}
 
-	if os.Getenv(allowExternalEnv) == "true" {
+	if allowExternalEnv != "" && os.Getenv(allowExternalEnv) == "true" {
 		return nil
 	}
 	if !allowedHosts[host] {
@@ -98,6 +138,9 @@ func Validate(target string, allowedHosts map[string]bool, allowExternalEnv, fea
 		// reads as if membership were scoped to a network/interface rather than
 		// being the plain hostname lookup it actually is. Both misled the person
 		// who wrote them.
+		if allowExternalEnv == "" {
+			return fmt.Errorf("target host %q is not in the allowed target host list (allowed: %s) - add it to %s", host, strings.Join(names, ", "), ExtraAllowedHostsEnv)
+		}
 		return fmt.Errorf("target host %q is not in the allowed target host list (allowed: %s) - add it to %s (infra config, recommended), or set %s=true to drop the allowlist entirely (debug only)", host, strings.Join(names, ", "), ExtraAllowedHostsEnv, allowExternalEnv)
 	}
 	return nil

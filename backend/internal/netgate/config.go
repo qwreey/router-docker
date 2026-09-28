@@ -29,11 +29,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 
 	"router/internal/atomicfile"
+	"router/internal/targetguard"
 )
 
 // mu serializes every read-modify-write below - without it, two concurrent
@@ -49,6 +51,8 @@ var mu sync.Mutex
 // instead of a silent per-cycle "does not resolve yet, skipping" log line.
 var hostRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
 
+var forwardAllowedHosts = targetguard.DefaultAllowedHosts()
+
 func validateHost(field, host string) error {
 	if host == "" || !hostRe.MatchString(host) {
 		return fmt.Errorf("%w: %s must be a plain hostname or IPv4 address", ErrValidation, field)
@@ -60,12 +64,12 @@ func validateHost(field, host string) error {
 // live config, where firewall.default.sh will hand it to `iptables -d` (or
 // `ip6tables -d` for an entry containing ':') on its next 30s cycle.
 //
-// Not an injection fix - the value reaches iptables as one argv element, so
-// it can't become a flag or a second rule. It's an "applied silently wrong"
-// fix: an unparseable CIDR makes that one `iptables -A` fail, the loop logs
-// a line nobody is watching and carries on, and the operator is left with a
-// UI that shows a block rule which does not exist. ErrValidation turns that
-// into a 400 at write time instead (see handleReplaceNetgateOutbound).
+// firewall.default.sh pastes the value into iptables-restore input, so this
+// parse is also what keeps it from carrying a newline or a second option (the
+// script re-checks the character set for hand-edited config files). It also
+// turns a value iptables would reject - which makes the whole cycle fail and
+// keeps the previous rules - into a 400 at write time (see
+// handleReplaceNetgateOutbound).
 //
 // Both families are accepted because firewall.default.sh mirrors v6 entries
 // onto ip6tables (it tells them apart by a bare ':'), and a bare address is
@@ -354,6 +358,12 @@ func AddForward(path string, f Forward) (Forward, error) {
 	}
 	if err := validatePort("targetPort", f.TargetPort); err != nil {
 		return Forward{}, err
+	}
+	// A forward publishes TargetHost on the host's own port, so it gets the
+	// same allowlist Dev Proxy/App Routes use - router's own admin port or
+	// dind's Docker API must never become reachable from outside this way.
+	if err := targetguard.ValidateHost(f.TargetHost, strconv.Itoa(f.TargetPort), forwardAllowedHosts, "", "port forward"); err != nil {
+		return Forward{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()

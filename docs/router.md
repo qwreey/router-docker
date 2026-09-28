@@ -104,10 +104,12 @@ publish:
 - **publish** — `target_host`로 지정한 컨테이너의 로컬 포트를 tailscale IP에 게시합니다.
   `local_port`는 router 자신이 아니라 **`target_host`**의 포트를 가리킵니다(router의
   `tailscale-publish` 프로그램이 `tcp://<target_host>:<local_port>`로 타겟팅). `target_host`는
-  router에서 `code-docker-internal` 네트워크로 접근 가능한 아무 컴포즈 서비스 호스트명/IP나
-  될 수 있습니다 — `code-docker`뿐 아니라 `dind` 등 같은 네트워크의 다른 컨테이너도 게시
-  대상으로 쓸 수 있습니다. 생략하면 이전 버전과의 호환을 위해 `code-docker`로 기본
-  설정됩니다.
+  Dev Proxy와 같은 허용 목록에 있어야 합니다: `code-docker`, `dind`, 그리고
+  `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`에 넣은 호스트입니다. 생략하면 이전 버전과의 호환을
+  위해 `code-docker`로 기본 설정됩니다.
+  - tailnet 전체에 게시되므로, router 자신이나 dind의 Docker API(2375/2376)처럼 인증 없는
+    관리 포트는 어떤 설정으로도 대상이 될 수 없습니다.
+  - dind 안 컨테이너가 게시한 다른 포트는 괜찮습니다.
 
 직접 편집한 뒤 UI를 거치지 않고 반영하려면:
 

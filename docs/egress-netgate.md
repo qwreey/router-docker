@@ -98,7 +98,9 @@ dind는 이미 privileged라 별도 에이전트 없이 자기 netns 안에서 �
   자신의 nginx가 80번을 직접 리스닝해 로컬 리스너로 처리하므로(로컬 리스너가 항상
   PREROUTING DNAT보다 우선합니다) 그 항목은 죽은 설정이 되어 제거되었습니다. `forwards:`
   항목을 추가하면(다른 호스트 포트를 다른 `code-docker-internal` 컨테이너로 전달하고
-  싶을 때) 그 포트포워딩용 ACCEPT 규칙은 항상 RFC1918 차단 규칙보다 **먼저** 적용됩니다 -
+  싶을 때) 대상 호스트는 Dev Proxy와 같은 허용 목록(`code-docker`, `dind`,
+  `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`)에 있어야 합니다. router 자신과 dind의 Docker API
+  포트(2375/2376)는 절대 허용되지 않습니다. 그 포트포워딩용 ACCEPT 규칙은 항상 RFC1918 차단 규칙보다 **먼저** 적용됩니다 -
   대상 컨테이너의 IP 자체가 RFC1918 대역에 속하기 때문입니다.
 - code-docker와 dind의 DNS 쿼리는 결국 router의 `dnsmasq`(`config/dns/`)로 들어와,
   router 자신의(정상 동작하는) upstream으로 포워딩됩니다. 다만 경로가 서로 다릅니다 —
