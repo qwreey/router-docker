@@ -699,7 +699,12 @@ default install shipped an unauthenticated admin API that could rewrite netgate'
 egress rules. 503 and not 401 on purpose: 401 is what `frontend/src/api/client.ts` turns
 into an unlock prompt, and there is no password to type yet. `GET /api/auth/status` and
 `POST /api/auth/setup` are deliberately unwrapped, so the first-run setup flow still
-works from a fully-locked state; that's what keeps this from being a brick.
+works from a fully-locked state; that's what keeps this from being a brick. Setup
+still needs a credential of sorts: a single-use token printed to the container log
+(`AnnounceSetupToken`, written to PID 1's stdout since router-manager's own stdout is a
+file). Only the host operator can read that log. Without it, whoever reached a freshly
+started, internet-facing router first could claim the admin password. The token lives
+in memory only, is fresh per process, and is rotated once used.
 `GET /api/tailscale/status` moved *behind* the gate in the same pass — it returns the
 whole tailnet peer list (hostnames, IPs, tags, online state), which is a description of
 the operator's private network, not a status flag. That made it the second `GET`

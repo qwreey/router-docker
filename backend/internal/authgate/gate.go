@@ -4,7 +4,9 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,6 +23,7 @@ var (
 	ErrNotConfigured     = errors.New("authgate: no password configured yet")
 	ErrEnvPinned         = errors.New("authgate: password is pinned by ROUTER_MANAGER_AUTH_PASSWORD_HASH, not changeable via API")
 	ErrWrongPassword     = errors.New("authgate: incorrect current password")
+	ErrBadSetupToken     = errors.New("authgate: missing or incorrect setup token")
 	// ErrRateLimited is returned by TryUnlock once a key has failed
 	// maxFailuresBeforeLockout times in a row - handlers surface this as
 	// 429 rather than the ambiguous "incorrect password" 401 a real guess
@@ -95,6 +98,16 @@ type Gate struct {
 
 	attemptsMu sync.Mutex
 	attempts   map[string]*attemptState
+
+	// setupToken is what SetupPassword demands alongside the new password
+	// while nothing is configured: proof that the caller can read this
+	// process's startup log, i.e. is the host operator, not merely the first
+	// stranger to reach /router/ over the network. Memory only, fresh per
+	// process, rotated once used. setupMu also serializes SetupPassword so
+	// two concurrent setups can't both pass the Configured() check.
+	setupMu        sync.Mutex
+	setupToken     string
+	tokenAnnounced bool
 }
 
 // New creates a Gate. envHash empty means no infra-as-code pin; storePath
@@ -114,7 +127,42 @@ func New(envHash, storePath string) *Gate {
 		// unforgeable tokens at all — nothing downstream would work either.
 		panic("authgate: failed to generate HMAC secret: " + err.Error())
 	}
-	return &Gate{envHash: envHash, storePath: storePath, secret: secret, attempts: map[string]*attemptState{}}
+	return &Gate{envHash: envHash, storePath: storePath, secret: secret, attempts: map[string]*attemptState{}, setupToken: newSetupToken()}
+}
+
+// newSetupToken returns 128 random bits as 32 hex characters - enough that
+// guessing it over the network is not a concern, so SetupPassword doesn't
+// need a lockout of its own.
+func newSetupToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("authgate: failed to generate setup token: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// normalizeSetupToken forgives what copying a token out of a terminal tends
+// to add: surrounding whitespace, and upper case.
+func normalizeSetupToken(t string) string {
+	return strings.ToLower(strings.TrimSpace(t))
+}
+
+// AnnounceSetupToken calls announce with the current setup token, at most
+// once per token, and only while no password is configured. Callers invoke
+// it at startup and again whenever the unconfigured state is observed (a
+// status or setup request), so a password file deleted at runtime to reset
+// the gate still gets its token printed without a restart.
+func (g *Gate) AnnounceSetupToken(announce func(token string)) {
+	if g == nil || g.Configured() {
+		return
+	}
+	g.setupMu.Lock()
+	defer g.setupMu.Unlock()
+	if g.tokenAnnounced {
+		return
+	}
+	g.tokenAnnounced = true
+	announce(g.setupToken)
 }
 
 // rateLimited reports whether key is currently locked out, and for how much
@@ -203,19 +251,32 @@ func (g *Gate) Source() string {
 // SetupPassword sets the initial password, file-backed — only allowed when
 // nothing is configured yet (neither envHash nor a prior stored hash).
 // Deliberately not itself gated by RequirePassword (see handlers_auth.go):
-// there's nothing to authenticate against until this succeeds once.
-func (g *Gate) SetupPassword(plaintext string) error {
+// there's nothing to authenticate against until this succeeds once. The
+// setup token (see AnnounceSetupToken) stands in for that missing
+// credential; it is single-use - rotated on success, so a later reset
+// (deleting the password file) needs the newly announced one.
+func (g *Gate) SetupPassword(token, plaintext string) error {
 	if g.storePath == "" {
 		return errors.New("authgate: no store path configured")
 	}
+	g.setupMu.Lock()
+	defer g.setupMu.Unlock()
 	if g.Configured() {
 		return ErrAlreadyConfigured
+	}
+	if subtle.ConstantTimeCompare([]byte(normalizeSetupToken(token)), []byte(g.setupToken)) != 1 {
+		return ErrBadSetupToken
 	}
 	hash, err := HashPassword(plaintext)
 	if err != nil {
 		return err
 	}
-	return writeStoredHash(g.storePath, hash)
+	if err := writeStoredHash(g.storePath, hash); err != nil {
+		return err
+	}
+	g.setupToken = newSetupToken()
+	g.tokenAnnounced = false
+	return nil
 }
 
 // ChangePassword replaces the stored password, requiring the current one.

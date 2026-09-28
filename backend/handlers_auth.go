@@ -179,10 +179,38 @@ func trustedHosts() []string {
 	return hosts
 }
 
+// containerLogPath is PID 1's stdout inside router's container - supervisord's,
+// which is the stream `docker compose logs` shows. router-manager's own stdout
+// goes to a rotated file under /var/log (see supervisord.d/router-manager.conf),
+// which the operator would have to exec in to read.
+const containerLogPath = "/proc/1/fd/1"
+
+// announceSetupToken prints the first-run setup token where the host operator
+// will see it: the container log, plus router-manager's own log as a fallback
+// (e.g. outside the container, in development). Only someone who can read the
+// host's docker logs learns it - that is the whole proof of ownership.
+func announceSetupToken(token string) {
+	msg := "" +
+		"==================================================================\n" +
+		"router-manager: no admin password is set yet.\n" +
+		"router-manager: setup-token: " + token + "\n" +
+		"router-manager: open /router/ and enter this token with a new password.\n" +
+		"router-manager: single use; a new one is generated on every restart.\n" +
+		"==================================================================\n"
+	log.Print("\n" + msg)
+	f, err := os.OpenFile(containerLogPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(msg)
+}
+
 // handleAuthStatus lets the frontend know whether to show a password
 // prompt at all, and if so whether the current session already satisfies
 // it.
 func handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	gate.AnnounceSetupToken(announceSetupToken)
 	resp := authStatusResponse{
 		Required:     gate.Configured(),
 		Source:       gate.Source(),
@@ -201,9 +229,12 @@ func handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 // handleAuthSetup sets the initial password - only works when nothing is
 // configured yet (gate.Source() == "unset"). Never gated by
 // RequirePassword, same reasoning as handleAuthUnlock: there's nothing to
-// authenticate against until this succeeds once.
+// authenticate against until this succeeds once. It demands the setup token
+// from the container log instead, so whoever reaches /router/ first over the
+// network can't claim the password before the operator does.
 func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password == "" {
@@ -211,9 +242,14 @@ func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := gate.SetupPassword(body.Password); err != nil {
+	gate.AnnounceSetupToken(announceSetupToken)
+	if err := gate.SetupPassword(body.Token, body.Password); err != nil {
 		if errors.Is(err, authgate.ErrAlreadyConfigured) {
 			writeError(w, http.StatusConflict, "password already configured - use /api/auth/change instead")
+			return
+		}
+		if errors.Is(err, authgate.ErrBadSetupToken) {
+			writeError(w, http.StatusForbidden, "missing or incorrect setup token - it is printed in router's container log (docker compose logs code-docker-router | grep setup-token)")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())

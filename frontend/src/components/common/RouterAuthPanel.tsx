@@ -20,6 +20,7 @@ export function RouterAuthPanel() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [setupToken, setSetupToken] = useState('')
   const [password, setPassword] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -44,7 +45,8 @@ export function RouterAuthPanel() {
     setSubmitting(true)
     setFormError(null)
     try {
-      await authApi.post('/setup', { password })
+      await authApi.post('/setup', { token: setupToken, password })
+      setSetupToken('')
       setPassword('')
       setNotice('설정되었습니다.')
       await load()
@@ -100,8 +102,25 @@ export function RouterAuthPanel() {
             아직 비밀번호가 설정되지 않았습니다. router-manager(tailscale/Dev Proxy/App
             Routes/tinyauth 관리 API)를 보호할 비밀번호를 지금 설정하세요.
           </p>
+          <p className="section-description">
+            처음 설정할 때는 router 컨테이너 로그에 찍힌 setup 토큰이 필요합니다 - 호스트에서{' '}
+            <code>docker compose logs code-docker-router | grep setup-token</code>으로 확인하세요.
+            토큰은 한 번만 쓸 수 있고 router가 재시작할 때마다 새로 만들어집니다.
+          </p>
           <form onSubmit={handleSetup} className="form-grid-inline">
             <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="router-auth-setup-token">setup 토큰</label>
+                <input
+                  id="router-auth-setup-token"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={setupToken}
+                  onChange={(e) => setSetupToken(e.target.value)}
+                  required
+                />
+              </div>
               <div className="form-field">
                 <label htmlFor="router-auth-setup-password">새 비밀번호</label>
                 <input
@@ -113,7 +132,7 @@ export function RouterAuthPanel() {
                 />
               </div>
             </div>
-            <button type="submit" className="btn btn-primary" disabled={submitting || !password}>
+            <button type="submit" className="btn btn-primary" disabled={submitting || !password || !setupToken.trim()}>
               {submitting ? '설정하는 중...' : '비밀번호 설정'}
             </button>
           </form>

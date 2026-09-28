@@ -99,6 +99,7 @@ func main() {
 		authStorePath = "/var/lib/code-docker-router/auth-hash.json"
 	}
 	gate = authgate.New(authPasswordHash, authStorePath)
+	gate.AnnounceSetupToken(announceSetupToken)
 
 	staticDir := os.Getenv("ROUTER_MANAGER_STATIC_DIR")
 	if staticDir == "" {
