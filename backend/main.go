@@ -106,6 +106,35 @@ func main() {
 		staticDir = "./static"
 	}
 
+	if err := netgate.EnsureSeeded(); err != nil {
+		log.Printf("main: couldn't seed netgate live config: %v", err)
+	}
+	novncDir := os.Getenv("ROUTER_NOVNC_DIR")
+	if novncDir == "" {
+		novncDir = "/opt/novnc"
+	}
+	mux := newMux(staticDir, novncDir)
+
+	go normalizeCaddyFragments()
+
+	listener, err := listen()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("router-manager listening on %s (auth gate configured: %v, source: %s)", listener.Addr(), gate.Configured(), gate.Source())
+	if err := http.Serve(listener, mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// newMux registers every route. Reads are gated like writes: the lists these
+// return describe the operator's private network and its users (forwards,
+// outbound rules, DNS overrides, tinyauth usernames, who is watching a VNC
+// session and from which IP), not a status flag. Left open on purpose:
+// auth status/setup/unlock (the way in), the env-version banner,
+// tailscale/state (an enabled/login flag code-server and webmanager poll
+// without a session), a vhost's PWA manifest, and the static SPA/noVNC files.
+func newMux(staticDir, novncDir string) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/system/env-version", handleEnvVersion)
 
@@ -120,13 +149,13 @@ func main() {
 	mux.HandleFunc("POST /api/auth/change", handleAuthChange)
 
 	mux.HandleFunc("GET /api/tailscale/state", handleTailscaleState)
-	mux.HandleFunc("GET /api/tailscale/config", handleGetTailscaleConfig)
+	mux.Handle("GET /api/tailscale/config", gate.RequirePassword(http.HandlerFunc(handleGetTailscaleConfig)))
 	mux.Handle("PUT /api/tailscale/config", gate.RequirePassword(http.HandlerFunc(handlePutTailscaleConfig)))
-	mux.HandleFunc("GET /api/tailscale/forwards", handleListTailscaleForwards)
+	mux.Handle("GET /api/tailscale/forwards", gate.RequirePassword(http.HandlerFunc(handleListTailscaleForwards)))
 	mux.Handle("POST /api/tailscale/forwards", gate.RequirePassword(http.HandlerFunc(handleAddTailscaleForward)))
 	mux.Handle("PUT /api/tailscale/forwards/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateTailscaleForward)))
 	mux.Handle("DELETE /api/tailscale/forwards/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteTailscaleForward)))
-	mux.HandleFunc("GET /api/tailscale/publish", handleListTailscalePublish)
+	mux.Handle("GET /api/tailscale/publish", gate.RequirePassword(http.HandlerFunc(handleListTailscalePublish)))
 	mux.Handle("POST /api/tailscale/publish", gate.RequirePassword(http.HandlerFunc(handleAddTailscalePublish)))
 	mux.Handle("PUT /api/tailscale/publish/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateTailscalePublish)))
 	mux.Handle("DELETE /api/tailscale/publish/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteTailscalePublish)))
@@ -141,13 +170,13 @@ func main() {
 	mux.Handle("GET /api/tailscale/status", gate.RequirePassword(http.HandlerFunc(handleTailscaleStatus)))
 	mux.Handle("POST /api/tailscale/login/start", gate.RequirePassword(http.HandlerFunc(handleTailscaleLoginStart)))
 	mux.Handle("POST /api/tailscale/login/cancel", gate.RequirePassword(http.HandlerFunc(handleTailscaleLoginCancel)))
-	mux.HandleFunc("GET /api/dev-proxy/exposes", handleListDevProxyExposes)
+	mux.Handle("GET /api/dev-proxy/exposes", gate.RequirePassword(http.HandlerFunc(handleListDevProxyExposes)))
 	mux.Handle("POST /api/dev-proxy/exposes", gate.RequirePassword(http.HandlerFunc(handleCreateDevProxyExpose)))
 	mux.Handle("PUT /api/dev-proxy/exposes/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateDevProxyExpose)))
 	mux.Handle("DELETE /api/dev-proxy/exposes/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteDevProxyExpose)))
 	mux.Handle("POST /api/dev-proxy/reload", gate.RequirePassword(http.HandlerFunc(handleReloadDevProxy)))
 
-	mux.HandleFunc("GET /api/app-routes/apps", handleListAppRoutes)
+	mux.Handle("GET /api/app-routes/apps", gate.RequirePassword(http.HandlerFunc(handleListAppRoutes)))
 	mux.Handle("POST /api/app-routes/apps", gate.RequirePassword(http.HandlerFunc(handleCreateAppRoute)))
 	mux.Handle("PUT /api/app-routes/apps/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateAppRoute)))
 	mux.Handle("DELETE /api/app-routes/apps/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteAppRoute)))
@@ -156,7 +185,7 @@ func main() {
 	// The VNC tab (internal/vnc) - a registry layered ON TOP of App Routes
 	// above, not a parallel proxy mechanism, so these routes deliberately
 	// sit next to them.
-	mux.HandleFunc("GET /api/vnc/targets", handleListVncTargets)
+	mux.Handle("GET /api/vnc/targets", gate.RequirePassword(http.HandlerFunc(handleListVncTargets)))
 	mux.Handle("POST /api/vnc/targets", gate.RequirePassword(http.HandlerFunc(handleCreateVncTarget)))
 	mux.Handle("PUT /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateVncTarget)))
 	mux.Handle("DELETE /api/vnc/targets/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteVncTarget)))
@@ -171,36 +200,33 @@ func main() {
 	// non-empty for a BackendRFB target - handleListVncClients answers `[]`
 	// for anything else rather than a per-backend error, since "nobody's
 	// connected through here" is simply true for BackendNoVNC too.
-	mux.HandleFunc("GET /api/vnc/targets/{name}/clients", handleListVncClients)
+	mux.Handle("GET /api/vnc/targets/{name}/clients", gate.RequirePassword(http.HandlerFunc(handleListVncClients)))
 	mux.Handle("DELETE /api/vnc/targets/{name}/clients/{id}", gate.RequirePassword(http.HandlerFunc(handleDeleteVncClient)))
 
-	mux.HandleFunc("GET /api/tinyauth/users", handleListTinyauthUsers)
+	mux.Handle("GET /api/tinyauth/users", gate.RequirePassword(http.HandlerFunc(handleListTinyauthUsers)))
 	mux.Handle("POST /api/tinyauth/users", gate.RequirePassword(http.HandlerFunc(handleAddTinyauthUser)))
 	mux.Handle("PUT /api/tinyauth/users/{name}/password", gate.RequirePassword(http.HandlerFunc(handleSetTinyauthUserPassword)))
 	mux.Handle("DELETE /api/tinyauth/users/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteTinyauthUser)))
 
-	mux.HandleFunc("GET /api/dns/blocklist-sources", handleListBlocklistSources)
+	mux.Handle("GET /api/dns/blocklist-sources", gate.RequirePassword(http.HandlerFunc(handleListBlocklistSources)))
 	mux.Handle("POST /api/dns/blocklist-sources", gate.RequirePassword(http.HandlerFunc(handleCreateBlocklistSource)))
 	mux.Handle("PUT /api/dns/blocklist-sources/{name}", gate.RequirePassword(http.HandlerFunc(handleUpdateBlocklistSource)))
 	mux.Handle("DELETE /api/dns/blocklist-sources/{name}", gate.RequirePassword(http.HandlerFunc(handleDeleteBlocklistSource)))
-	mux.HandleFunc("GET /api/dns/blocklist-sources/builtin/status", handleBuiltinBlocklistStatus)
+	mux.Handle("GET /api/dns/blocklist-sources/builtin/status", gate.RequirePassword(http.HandlerFunc(handleBuiltinBlocklistStatus)))
 	mux.Handle("POST /api/dns/blocklist-sources/builtin/pull", gate.RequirePassword(http.HandlerFunc(handleBuiltinBlocklistPull)))
 	mux.Handle("POST /api/dns/blocklist-sources/builtin/ignore", gate.RequirePassword(http.HandlerFunc(handleBuiltinBlocklistIgnore)))
-	mux.HandleFunc("GET /api/dns/custom-hosts", handleListCustomHosts)
+	mux.Handle("GET /api/dns/custom-hosts", gate.RequirePassword(http.HandlerFunc(handleListCustomHosts)))
 	mux.Handle("PUT /api/dns/custom-hosts", gate.RequirePassword(http.HandlerFunc(handleSetCustomHosts)))
-	mux.HandleFunc("GET /api/dns/resolver", handleGetResolverConfig)
+	mux.Handle("GET /api/dns/resolver", gate.RequirePassword(http.HandlerFunc(handleGetResolverConfig)))
 	mux.Handle("PUT /api/dns/resolver", gate.RequirePassword(http.HandlerFunc(handleSetResolverConfig)))
-	mux.HandleFunc("GET /api/dns/query", handleDNSQuery)
+	mux.Handle("GET /api/dns/query", gate.RequirePassword(http.HandlerFunc(handleDNSQuery)))
 
-	if err := netgate.EnsureSeeded(); err != nil {
-		log.Printf("main: couldn't seed netgate live config: %v", err)
-	}
-	mux.HandleFunc("GET /api/netgate/outbound", handleListNetgateOutbound)
+	mux.Handle("GET /api/netgate/outbound", gate.RequirePassword(http.HandlerFunc(handleListNetgateOutbound)))
 	mux.Handle("PUT /api/netgate/outbound", gate.RequirePassword(http.HandlerFunc(handleReplaceNetgateOutbound)))
-	mux.HandleFunc("GET /api/netgate/forwards", handleListNetgateForwards)
+	mux.Handle("GET /api/netgate/forwards", gate.RequirePassword(http.HandlerFunc(handleListNetgateForwards)))
 	mux.Handle("POST /api/netgate/forwards", gate.RequirePassword(http.HandlerFunc(handleAddNetgateForward)))
 	mux.Handle("DELETE /api/netgate/forwards/{hostPort}", gate.RequirePassword(http.HandlerFunc(handleDeleteNetgateForward)))
-	mux.HandleFunc("GET /api/netgate/bandwidth", handleGetNetgateBandwidth)
+	mux.Handle("GET /api/netgate/bandwidth", gate.RequirePassword(http.HandlerFunc(handleGetNetgateBandwidth)))
 	mux.Handle("PUT /api/netgate/bandwidth", gate.RequirePassword(http.HandlerFunc(handleSetNetgateBandwidth)))
 
 	// Everything else falls through to the built SPA (AppRoutes/DevProxy/
@@ -217,24 +243,10 @@ func main() {
 	// ServeMux's implicit "/novnc" -> "/novnc/" redirect, which would
 	// otherwise fire on a path nginx has already stripped /router off and
 	// so bounce the browser to the origin root.
-	novncDir := os.Getenv("ROUTER_NOVNC_DIR")
-	if novncDir == "" {
-		novncDir = "/opt/novnc"
-	}
 	mux.Handle("GET /novnc/{path...}", http.StripPrefix("/novnc/", novncHandler(novncDir)))
 
 	mux.Handle("GET /", staticHandler(staticDir))
-
-	go normalizeCaddyFragments()
-
-	listener, err := listen()
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("router-manager listening on %s (auth gate configured: %v, source: %s)", listener.Addr(), gate.Configured(), gate.Source())
-	if err := http.Serve(listener, mux); err != nil {
-		log.Fatal(err)
-	}
+	return mux
 }
 
 // normalizeCaddyFragments re-renders any managed Dev Proxy / App Routes

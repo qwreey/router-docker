@@ -690,9 +690,12 @@ a trailing slash. Confirmed live that an absolute `/` base 404s every asset unde
 since the browser resolves a root-absolute `src` against the origin root, bypassing the
 `/router/` prefix entirely.
 
-router-manager's own admin-API auth (`backend/internal/authgate`) gates every *mutating*
-route above (tailscale config/forwards/publish/login writes, dev-proxy expose writes) —
-reads (state, config, list) stay open. **It is no longer opt-in: as of the 2026-09-07
+router-manager's own admin-API auth (`backend/internal/authgate`) gates every route in
+`main.go`'s `newMux`, reads included (2026-09-29, audit F18): the lists describe the
+operator's network and users (forwards, outbound, DNS overrides, tinyauth usernames, VNC
+viewers' IPs), not status. The deliberately open set is listed in `newMux`'s doc comment
+and pinned by `routes_test.go`; a background poll of a gated route must use the SPA's
+`api.poll` (no unlock prompt). **It is no longer opt-in: as of the 2026-09-07
 security review (finding C2), `RequirePassword` is fail-CLOSED.** With no password
 configured it answers `503 {"error":"router-manager password not configured - ..."}`
 instead of calling `next.ServeHTTP` — which it used to do unconditionally, meaning a

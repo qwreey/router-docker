@@ -319,9 +319,17 @@ router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish의
 사용자 CRUD, DNS 블록리스트 소스/custom hosts/resolver의 `POST`/`PUT`/`DELETE`, netgate
 "Net 관리" 탭의 outbound/forwards `PUT`/`POST`/`DELETE`, 대역폭 제한
 `PUT /api/netgate/bandwidth`, VNC 대상의 `POST`/`PUT`/`DELETE`)는 비밀번호 게이트로
-보호됩니다. 읽기 라우트(state/config/list, DNS의 `/api/dns/query` 포함)는 항상
-열려 있습니다 — webmanager 자체 게이트와 같은 "읽기는 열어두고 쓰기만 잠근다"
-관례입니다.
+보호됩니다. **읽기도 마찬가지입니다**(2026-09-29부터). forwards/outbound/DNS 목록,
+tinyauth 사용자 이름, VNC 접속자의 IP·User-Agent 같은 목록은 상태 플래그가 아니라
+운영자의 사설망과 사용자에 대한 정보라서, 그 `GET`도 전부 게이트 뒤에 있습니다
+(`/api/dns/query` 포함). 그래서 `/router/`의 각 탭은 열 때 잠금 해제를 요구합니다.
+비밀번호 없이 열려 있는 것은 다음뿐입니다:
+
+- `GET /api/auth/status`, `POST /api/auth/setup`·`unlock`·`change` — 들어오는 길.
+- `GET /api/system/env-version` — 설정 버전 배너.
+- `GET /api/tailscale/state` — 켜짐 여부/로그인 상태 플래그. code-server 로그인 배너와
+  두 사이드바가 세션 없이 폴링합니다.
+- `GET /api/vhost-pwa/{name}/manifest`, SPA와 noVNC 정적 파일.
 
 > **비밀번호는 더 이상 선택이 아닙니다(2026-09-07).** 예전에는 비밀번호가
 > 설정되지 않았으면 게이트가 요청을 **그냥 통과**시켰습니다 — 즉 기본 설치
@@ -359,20 +367,10 @@ router-manager 자신의 관리 API(tailscale config `PUT`, forwards/publish의
 > - `ROUTER_MANAGER_AUTH_PASSWORD_HASH`(ootb/migrate가 물어보는 그 값)로 고정하면 이
 >   흐름 자체를 거치지 않습니다.
 
-이 관례에 **예외가 둘** 있습니다. 둘 다 메서드는 `GET`이지만 게이트 뒤입니다:
-
-- `rfb` 백엔드의 RFB 브리지(`GET /api/vnc/targets/{name}/ws`) — 목록 조회가
-  아니라 원격 데스크톱에 실제로 연결하는 통로라, 여기를 열어두면 비밀번호를
-  건너뛰고 화면·키보드·마우스를 그대로 넘겨주는 것과 같기 때문입니다
-  (`rfb` 백엔드가 tinyauth의 "인증 요구"를 아예 거부하고 router-manager 자신의
-  비밀번호로만 잠기는 것도 같은 이유입니다). VNC 탭이 갑자기 401을 뱉는다면
-  여기를 보세요.
-- `GET /api/tailscale/status` — `tailscale status --json`을 그대로 돌려주므로
-  태일넷의 모든 피어 호스트명·IP·태그·온라인 여부, 즉 사설망 지도 전체가
-  실립니다. 상태 플래그가 아니라 네트워크 명세입니다.
-  `GET /api/tailscale/state`(backendState/authUrl + `enabled`)는 계속 열려
-  있고, code-server의 로그인 배너, `/router/` SPA 사이드바, webmanager 사이드바의
-  탭 표시 판단은 모두 이쪽을 씁니다.
+참고로 `rfb` 백엔드의 RFB 브리지(`GET /api/vnc/targets/{name}/ws`)는 목록이 아니라
+원격 데스크톱에 실제로 연결하는 통로입니다. 그래서 `rfb` 백엔드는 tinyauth의 "인증
+요구"를 받지 않고 router-manager 자신의 비밀번호로만 잠깁니다. VNC 탭이 갑자기 401을
+뱉는다면 여기를 보세요.
 
 **로그인 시도 잠금(rate limit)은 `X-Real-IP` 기준입니다.** router-manager는
 유닉스 소켓을 듣기 때문에 `RemoteAddr`이 모든 호출자에게 동일하고, 그걸로

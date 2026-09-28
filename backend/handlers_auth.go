@@ -183,7 +183,7 @@ func trustedHosts() []string {
 // which is the stream `docker compose logs` shows. router-manager's own stdout
 // goes to a rotated file under /var/log (see supervisord.d/router-manager.conf),
 // which the operator would have to exec in to read.
-const containerLogPath = "/proc/1/fd/1"
+var containerLogPath = "/proc/1/fd/1"
 
 // announceSetupToken prints the first-run setup token where the host operator
 // will see it: the container log, plus router-manager's own log as a fallback
