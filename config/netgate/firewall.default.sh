@@ -33,46 +33,71 @@ resolve_config_path() {
 	fi
 }
 
-# Each cycle flushes and rebuilds netgate's own chains (see apply_rules
-# below) - this is idempotent but not atomic, so there's a brief window
-# every cycle where the rebuilt chain is empty and FORWARD's default ACCEPT
-# policy applies unfiltered. Same accepted trade-off qdm12/gluetun's
-# firewall documents for the same pattern (their iptables rules apply after
-# Docker's own network init, leaving a similar small window) - see the plan
-# doc's research notes. Not attempting an atomic chain swap here to keep
-# this script simple; revisit if the window ever proves large enough to
-# matter in practice.
-ensure_chain() {
-	iptables -t "$1" -N "$2" 2>/dev/null || iptables -t "$1" -F "$2"
-}
-
+# Each cycle rebuilds netgate's own chains from scratch and commits them in one
+# `iptables-restore --noflush` transaction per table: a `:CHAIN - [0:0]` line
+# replaces that chain's rules atomically, other chains are left alone, and a
+# transaction with any bad line is rejected whole, leaving the previous cycle's
+# rules in place. Flushing and re-adding rule by rule instead left the chain
+# empty for a moment every 30s, and FORWARD's default ACCEPT then let traffic
+# to RFC1918/metadata addresses through.
 ensure_jump() {
 	iptables -t "$1" -C "$2" -j "$3" 2>/dev/null || iptables -t "$1" -I "$2" 1 -j "$3"
-}
-
-# --- IPv6 (security-review H3 fix, 2026-09-14) --------------------------
-#
-# Every function/rule above and below this block is IPv4-only and
-# deliberately untouched. IPv6 is off by default (ENABLE_IPV6 unset/false
-# in example-env only configures docker-compose's own network defs, never
-# passed into this container as an env var) - so detection here is dynamic
-# (a live global-scope IPv6 address actually assigned to this container),
-# not a re-read of that var, and in the common case none of this runs at
-# all. This mirrors only the fixed always-block set (ULA/link-local/
-# loopback, the v6 analogues of the v4 RFC1918/link-local/loopback set
-# above) plus whatever outbound: entries in config.yaml happen to be v6
-# CIDRs - config.default.yaml ships v4-only today, so that part is a no-op
-# until config.yaml actually grows a v6 entry (config-driven v6 rules
-# aren't a supported feature yet, this just means one won't be silently
-# dropped later). forwards: (DNAT) and bandwidth: are NOT mirrored to v6 -
-# out of scope for this fix, see docs/egress-netgate.md's IPv6 section.
-ensure_chain6() {
-	ip6tables -t "$1" -N "$2" 2>/dev/null || ip6tables -t "$1" -F "$2"
 }
 
 ensure_jump6() {
 	ip6tables -t "$1" -C "$2" -j "$3" 2>/dev/null || ip6tables -t "$1" -I "$2" 1 -j "$3"
 }
+
+# Always blocked, ahead of every config.yaml outbound: entry, so no allow rule
+# (or an outbound list emptied through the API) can reopen them: loopback,
+# link-local (cloud metadata endpoints live at 169.254.169.254) and "this
+# network". RFC1918 is deliberately NOT here - config.yaml blocks it, and a
+# narrow allow ahead of that block is how a workload is given one LAN host;
+# router-manager refuses an outbound list that drops those blocks entirely.
+FIXED_BLOCK_V4="127.0.0.0/8 169.254.0.0/16 0.0.0.0/8"
+FIXED_BLOCK_V6="fc00::/7 fe80::/10 ::1/128"
+
+# Values from config.yaml are pasted into iptables-restore input, not passed as
+# argv, so anything that could carry a newline or a second option is rejected
+# here rather than trusted to router-manager's own validation (config.override.yaml
+# is edited by hand).
+# A bare address is valid too (router-manager accepts one; `-d 8.8.8.8` is a
+# single-host rule). The character set alone is what keeps a value from
+# carrying a newline or another option; a malformed-but-harmless value makes
+# iptables-restore reject the cycle, loudly, leaving the previous rules.
+valid_cidr() {
+	case "$1" in
+	'' | *[!0-9A-Fa-f:./]*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+valid_port() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	*) [ "$1" -ge 1 ] && [ "$1" -le 65535 ] ;;
+	esac
+}
+
+# Rule text accumulated for this cycle's transactions.
+add_filter() { filter_rules="$filter_rules$*
+"; }
+add_nat() { nat_rules="$nat_rules$*
+"; }
+add_filter6() { filter6_rules="$filter6_rules$*
+"; }
+
+# --- IPv6 (security-review H3 fix, 2026-09-14) --------------------------
+#
+# IPv6 is off by default (ENABLE_IPV6 unset/false in example-env only
+# configures docker-compose's own network defs, never passed into this
+# container as an env var) - so detection here is dynamic (a live
+# global-scope IPv6 address actually assigned to this container), not a
+# re-read of that var, and in the common case none of this runs at all. This
+# mirrors only the fixed always-block set (FIXED_BLOCK_V6, the v6 analogues of
+# the v4 RFC1918/link-local/loopback set) plus whatever outbound: entries in
+# config.yaml happen to be v6 CIDRs. forwards: (DNAT) and bandwidth: are NOT
+# mirrored to v6 - see docs/egress-netgate.md's IPv6 section.
 
 # A global-scope IPv6 address only shows up once Docker's own IPv6 network
 # support has actually assigned one to this container - the real signal
@@ -109,29 +134,17 @@ apply_rules_v6() {
 		return 0
 	fi
 
-	if ! command -v ip6tables >/dev/null 2>&1; then
-		warn_ipv6_unfiltered "ip6tables binary not found in this image"
+	if ! command -v ip6tables-restore >/dev/null 2>&1; then
+		warn_ipv6_unfiltered "ip6tables-restore binary not found in this image"
 		return 0
 	fi
 
-	ensure_chain6 filter NETGATE-FORWARD6
-	ensure_jump6 filter FORWARD NETGATE-FORWARD6
-
-	# Same reasoning as the v4 stateful-accept rule below: without this,
-	# return traffic for an already-permitted v6 connection gets
-	# re-evaluated by the block rules on its way back.
-	if ! ip6tables -A NETGATE-FORWARD6 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; then
-		warn_ipv6_unfiltered "failed to insert the ip6tables stateful-accept rule"
-		return 1
-	fi
-
-	# Fixed block set: ULA (fc00::/7, the v6 analogue of RFC1918),
-	# link-local (fe80::/10) and loopback (::1/128) - applied
-	# unconditionally, the same fixed set the v4 side hardcodes for
-	# link-local/loopback rather than leaving it to config.yaml.
-	ip6tables -A NETGATE-FORWARD6 -d fc00::/7 -j DROP || warn_ipv6_unfiltered "failed to apply the fc00::/7 (ULA) block rule"
-	ip6tables -A NETGATE-FORWARD6 -d fe80::/10 -j DROP || warn_ipv6_unfiltered "failed to apply the fe80::/10 (link-local) block rule"
-	ip6tables -A NETGATE-FORWARD6 -d ::1/128 -j DROP || warn_ipv6_unfiltered "failed to apply the ::1/128 (loopback) block rule"
+	filter6_rules=""
+	# Same reasoning as the v4 stateful-accept rule below.
+	add_filter6 -A NETGATE-FORWARD6 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+	for cidr in $FIXED_BLOCK_V6; do
+		add_filter6 -A NETGATE-FORWARD6 -d "$cidr" -j DROP
+	done
 
 	# Mirror outbound: only for entries that are themselves v6 CIDRs - a
 	# bare ':' reliably tells a v6 CIDR from a v4 one (a dotted-quad CIDR
@@ -143,16 +156,26 @@ apply_rules_v6() {
 		case "$cidr" in
 		*:*)
 			action=$(printf '%s' "$config_snapshot" | yq -r ".outbound[$i].action")
-			case "$action" in
-			allow) ip6tables -A NETGATE-FORWARD6 -d "$cidr" -j ACCEPT ;;
-			block) ip6tables -A NETGATE-FORWARD6 -d "$cidr" -j DROP ;;
-			*) echo >&2 "netgate-firewall: unknown action '$action' for v6 cidr $cidr, skipping" ;;
-			esac
-			v6_out_count=$((v6_out_count + 1))
+			if ! valid_cidr "$cidr"; then
+				echo >&2 "netgate-firewall: invalid v6 cidr '$cidr', skipping"
+			else
+				case "$action" in
+				allow) add_filter6 -A NETGATE-FORWARD6 -d "$cidr" -j ACCEPT ;;
+				block) add_filter6 -A NETGATE-FORWARD6 -d "$cidr" -j DROP ;;
+				*) echo >&2 "netgate-firewall: unknown action '$action' for v6 cidr $cidr, skipping" ;;
+				esac
+				v6_out_count=$((v6_out_count + 1))
+			fi
 			;;
 		esac
 		i=$((i + 1))
 	done
+
+	if ! printf '*filter\n:NETGATE-FORWARD6 - [0:0]\n%sCOMMIT\n' "$filter6_rules" | ip6tables-restore --noflush; then
+		warn_ipv6_unfiltered "ip6tables-restore rejected this cycle's rules (previous rules, if any, stay in place)"
+		return 1
+	fi
+	ensure_jump6 filter FORWARD NETGATE-FORWARD6
 
 	echo "netgate-firewall: applied ip6tables fixed block set + $v6_out_count config-driven v6 outbound rule(s)"
 }
@@ -167,46 +190,39 @@ apply_rules() {
 
 	# Snapshot the config once per cycle instead of letting every yq call
 	# below re-open $NETGATE_CONFIG from disk independently: router-manager's
-	# own config writes are now atomic (temp file + rename, see
-	# internal/netgate's save()), so a single read here always sees either
-	# the old or the new file in full - never a torn/partial one - and every
-	# field extracted below is consistent with every other field from the
-	# same cycle, which N independent re-reads couldn't guarantee.
+	# own config writes are atomic (temp file + rename, see internal/netgate's
+	# save()), so a single read here always sees either the old or the new
+	# file in full, and every field below comes from the same version.
 	config_snapshot="$(cat "$NETGATE_CONFIG" 2>/dev/null)"
 
-	ensure_chain filter NETGATE-FORWARD
-	ensure_jump filter FORWARD NETGATE-FORWARD
-	ensure_chain nat NETGATE-PREROUTING
-	ensure_jump nat PREROUTING NETGATE-PREROUTING
-	ensure_chain nat NETGATE-POSTROUTING
-	ensure_jump nat POSTROUTING NETGATE-POSTROUTING
+	filter_rules=""
+	nat_rules=""
 
-	iptables -t nat -A NETGATE-POSTROUTING -o "$default_iface" -j MASQUERADE
+	add_nat -A NETGATE-POSTROUTING -o "$default_iface" -j MASQUERADE
 
 	# Stateful accept, always first: without this, RETURN traffic for any
 	# already-permitted connection (e.g. the forwards: DNAT reply below, or
 	# a code-docker outbound connection that was allowed on its way out)
 	# gets re-evaluated by the ordered outbound: rules below on its way
-	# back - and since Docker's own bridge subnets (code-docker-internal,
-	# code-docker-external) are themselves RFC1918 addresses, that reply
-	# traffic would get dropped by our own block rules. Confirmed by
-	# testing: the forwards: DNAT to code-docker:80 matched correctly on
-	# the way in, but the connection hung until this rule was added -
-	# established/related bypassing re-evaluation is standard stateful
-	# firewall practice and does not weaken NEW-connection filtering below
-	# (a fresh SYN from code-docker to a private IP still hits NEW state
-	# and gets evaluated normally).
-	iptables -A NETGATE-FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+	# back - and since Docker's own bridge subnets are themselves RFC1918
+	# addresses, that reply traffic would get dropped by our own block
+	# rules. A fresh SYN from code-docker to a private IP is still NEW and
+	# gets evaluated normally.
+	add_filter -A NETGATE-FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-	# Port forwards first - each one's FORWARD ACCEPT must land before the
+	# The fixed set next, so neither a forward's ACCEPT nor an outbound allow
+	# can reopen it.
+	for cidr in $FIXED_BLOCK_V4; do
+		add_filter -A NETGATE-FORWARD -d "$cidr" -j DROP
+	done
+
+	# Port forwards next - each one's FORWARD ACCEPT must land before the
 	# outbound: block rules below, since target_host's own address is
-	# typically itself in RFC1918 range (see config.default.yaml's
-	# comment and the plan doc's "인바운드" section).
+	# typically itself in RFC1918 range (see config.default.yaml's comment).
 	fwd_count=$(printf '%s' "$config_snapshot" | yq -r '.forwards | length' 2>/dev/null)
 	# Both a yq failure (nonzero exit, e.g. malformed YAML) and yq succeeding
-	# with empty output (e.g. $config_snapshot itself was empty - the config
-	# file doesn't exist yet) must fall back to 0 - an empty $fwd_count would
-	# otherwise make the `[ "$i" -lt "$fwd_count" ]` test below error out.
+	# with empty output (e.g. the config file doesn't exist yet) must fall
+	# back to 0 - an empty $fwd_count would make the loop test error out.
 	fwd_count="${fwd_count:-0}"
 	i=0
 	while [ "$i" -lt "$fwd_count" ]; do
@@ -214,16 +230,18 @@ apply_rules() {
 		target_host=$(printf '%s' "$config_snapshot" | yq -r ".forwards[$i].target_host")
 		target_port=$(printf '%s' "$config_snapshot" | yq -r ".forwards[$i].target_port")
 		target_ip="$(getent hosts "$target_host" 2>/dev/null | awk '{ print $1; exit }')"
-		if [ -n "$target_ip" ]; then
+		if ! valid_port "$host_port" || ! valid_port "$target_port"; then
+			echo >&2 "netgate-firewall: forward #$i has an invalid port ($host_port -> $target_port), skipping"
+		elif [ -z "$target_ip" ] || ! valid_cidr "$target_ip"; then
+			echo >&2 "netgate-firewall: forward #$i target '$target_host' does not resolve yet, skipping this cycle"
+		else
 			# -i "$default_iface" restricts this to traffic actually
 			# arriving from the host/internet side - without it, an
 			# outbound connection FROM code-docker-internal to some
 			# unrelated host:80 on the internet would also match
 			# --dport 80 and get DNATed back to target_host by mistake.
-			iptables -t nat -A NETGATE-PREROUTING -i "$default_iface" -p tcp --dport "$host_port" -j DNAT --to-destination "$target_ip:$target_port"
-			iptables -A NETGATE-FORWARD -d "$target_ip" -p tcp --dport "$target_port" -j ACCEPT
-		else
-			echo >&2 "netgate-firewall: forward #$i target '$target_host' does not resolve yet, skipping this cycle"
+			add_nat -A NETGATE-PREROUTING -i "$default_iface" -p tcp --dport "$host_port" -j DNAT --to-destination "$target_ip:$target_port"
+			add_filter -A NETGATE-FORWARD -d "$target_ip" -p tcp --dport "$target_port" -j ACCEPT
 		fi
 		i=$((i + 1))
 	done
@@ -234,13 +252,33 @@ apply_rules() {
 	while [ "$i" -lt "$out_count" ]; do
 		action=$(printf '%s' "$config_snapshot" | yq -r ".outbound[$i].action")
 		cidr=$(printf '%s' "$config_snapshot" | yq -r ".outbound[$i].cidr")
-		case "$action" in
-		allow) iptables -A NETGATE-FORWARD -d "$cidr" -j ACCEPT ;;
-		block) iptables -A NETGATE-FORWARD -d "$cidr" -j DROP ;;
-		*) echo >&2 "netgate-firewall: unknown action '$action' for $cidr, skipping" ;;
+		case "$cidr" in
+		*:*) ;; # v6 - apply_rules_v6's job
+		*)
+			if ! valid_cidr "$cidr"; then
+				echo >&2 "netgate-firewall: invalid cidr '$cidr', skipping"
+			else
+				case "$action" in
+				allow) add_filter -A NETGATE-FORWARD -d "$cidr" -j ACCEPT ;;
+				block) add_filter -A NETGATE-FORWARD -d "$cidr" -j DROP ;;
+				*) echo >&2 "netgate-firewall: unknown action '$action' for $cidr, skipping" ;;
+				esac
+			fi
+			;;
 		esac
 		i=$((i + 1))
 	done
+
+	# Filter before nat: for the moment between the two commits, the new
+	# DNAT target can only be dropped by the old filter (fail closed), never
+	# let through by something the new filter would refuse.
+	if ! printf '*filter\n:NETGATE-FORWARD - [0:0]\n%sCOMMIT\n*nat\n:NETGATE-PREROUTING - [0:0]\n:NETGATE-POSTROUTING - [0:0]\n%sCOMMIT\n' "$filter_rules" "$nat_rules" | iptables-restore --noflush; then
+		echo >&2 "netgate-firewall: iptables-restore rejected this cycle's rules - the previous cycle's rules stay in place"
+		return 1
+	fi
+	ensure_jump filter FORWARD NETGATE-FORWARD
+	ensure_jump nat PREROUTING NETGATE-PREROUTING
+	ensure_jump nat POSTROUTING NETGATE-POSTROUTING
 
 	echo "netgate-firewall: applied $fwd_count forward(s), $out_count outbound rule(s) (external=$default_iface)"
 

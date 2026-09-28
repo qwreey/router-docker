@@ -106,7 +106,7 @@ func TestReplaceOutboundRejectsMalformedCIDR(t *testing.T) {
 		"10.0.0.0/8 -j ACCEPT",
 	} {
 		path := t.TempDir() + "/config.yaml"
-		_, err := ReplaceOutbound(path, []OutboundRule{{Action: "block", CIDR: cidr}})
+		_, err := ReplaceOutbound(path, append([]OutboundRule{{Action: "block", CIDR: cidr}}, privateBlocks()...))
 		if err == nil {
 			t.Fatalf("ReplaceOutbound(cidr=%q) = nil error, want validation error", cidr)
 		}
@@ -123,6 +123,8 @@ func TestReplaceOutboundAcceptsEveryValidForm(t *testing.T) {
 	rules := []OutboundRule{
 		{Action: "block", CIDR: "10.0.0.0/8"},
 		{Action: "allow", CIDR: "192.168.1.5"},
+		{Action: "block", CIDR: "172.16.0.0/12"},
+		{Action: "block", CIDR: "192.168.0.0/16"},
 		{Action: "block", CIDR: "fc00::/7"},
 		{Action: "allow", CIDR: "::1"},
 	}
@@ -138,8 +140,47 @@ func TestReplaceOutboundAcceptsEveryValidForm(t *testing.T) {
 
 func TestReplaceOutboundRejectsUnknownAction(t *testing.T) {
 	path := t.TempDir() + "/config.yaml"
-	_, err := ReplaceOutbound(path, []OutboundRule{{Action: "drop", CIDR: "10.0.0.0/8"}})
+	_, err := ReplaceOutbound(path, append([]OutboundRule{{Action: "drop", CIDR: "10.0.0.0/8"}}, privateBlocks()...))
 	if !errors.Is(err, ErrInvalidAction) {
 		t.Fatalf("ReplaceOutbound(action=drop) = %v, want ErrInvalidAction", err)
+	}
+}
+
+func privateBlocks() []OutboundRule {
+	return []OutboundRule{
+		{Action: "block", CIDR: "10.0.0.0/8"},
+		{Action: "block", CIDR: "172.16.0.0/12"},
+		{Action: "block", CIDR: "192.168.0.0/16"},
+	}
+}
+
+// TestReplaceOutboundKeepsV4Backstop is the regression test for the
+// 2026-09-16 audit's F20: `PUT /api/netgate/outbound []` used to be accepted,
+// wiping every RFC1918/loopback block in one request.
+func TestReplaceOutboundKeepsV4Backstop(t *testing.T) {
+	for name, rules := range map[string][]OutboundRule{
+		"empty list":             {},
+		"one private block gone": privateBlocks()[:2],
+		"allow covering 10/8":    append([]OutboundRule{{Action: "allow", CIDR: "10.0.0.0/8"}}, privateBlocks()...),
+		"allow everything":       append([]OutboundRule{{Action: "allow", CIDR: "0.0.0.0/0"}}, privateBlocks()...),
+		"allow metadata":         append([]OutboundRule{{Action: "allow", CIDR: "169.254.169.254"}}, privateBlocks()...),
+		"allow loopback":         append([]OutboundRule{{Action: "allow", CIDR: "127.0.0.0/8"}}, privateBlocks()...),
+	} {
+		path := t.TempDir() + "/config.yaml"
+		if _, err := ReplaceOutbound(path, rules); !errors.Is(err, ErrValidation) {
+			t.Errorf("%s: ReplaceOutbound = %v, want ErrValidation", name, err)
+		}
+	}
+
+	ok := append([]OutboundRule{
+		{Action: "allow", CIDR: "192.168.1.0/24"},
+		{Action: "allow", CIDR: "10.1.2.3"},
+	}, privateBlocks()...)
+	if _, err := ReplaceOutbound(t.TempDir()+"/config.yaml", ok); err != nil {
+		t.Fatalf("narrow LAN exceptions ahead of the blocks were refused: %v", err)
+	}
+	// A supernet block also counts as keeping the range blocked.
+	if _, err := ReplaceOutbound(t.TempDir()+"/config.yaml", []OutboundRule{{Action: "block", CIDR: "0.0.0.0/0"}}); err != nil {
+		t.Fatalf("block 0.0.0.0/0 was refused: %v", err)
 	}
 }

@@ -18,7 +18,10 @@
 # connected route and never enters the FORWARD chain at all, verified in
 # this phase's own testing (see docs/egress-netgate.md).
 #
-# Default: block RFC1918 private ranges + link-local + loopback. Everything
+# Default: block RFC1918 private ranges + link-local + loopback (the last two,
+# plus 0.0.0.0/8, are also dropped by firewall.default.sh's FIXED_BLOCK_V4 no
+# matter what this list says; router-manager refuses a list that stops
+# blocking any RFC1918 range). Everything
 # else (the public internet) falls through to the implicit ACCEPT at the
 # end of the chain (no catch-all rule needed - this is a blocklist, not a
 # whitelist, see the plan doc's "결정됨" #2).

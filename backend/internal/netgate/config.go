@@ -219,6 +219,87 @@ func ListOutbound(path string) ([]OutboundRule, error) {
 	return cfg.Outbound, nil
 }
 
+// privateV4 must each stay blocked by some outbound rule: narrow allow
+// exceptions ahead of the block are how a workload gets one LAN host, but a
+// list with the block gone (or an allow covering the whole range) would open
+// the host's LAN and every other container on it to untrusted workloads.
+var privateV4 = mustParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+// fixedBlockV4 mirrors firewall.default.sh's FIXED_BLOCK_V4, which drops these
+// ahead of every outbound rule - an allow overlapping them could never take
+// effect, so it is refused rather than silently kept.
+var fixedBlockV4 = mustParseCIDRs("127.0.0.0/8", "169.254.0.0/16", "0.0.0.0/8")
+
+func mustParseCIDRs(cidrs ...string) []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+		nets = append(nets, n)
+	}
+	return nets
+}
+
+// ruleNet parses an outbound CIDR or bare address (already validated) into a
+// network; ok is false for v6, which this backstop doesn't cover (v6's fixed
+// set is enforced in firewall.default.sh regardless of config).
+func ruleNet(cidr string) (*net.IPNet, bool) {
+	if _, n, err := net.ParseCIDR(cidr); err == nil {
+		return n, n.IP.To4() != nil
+	}
+	ip := net.ParseIP(cidr).To4()
+	if ip == nil {
+		return nil, false
+	}
+	return &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}, true
+}
+
+// covers reports whether outer contains all of inner.
+func covers(outer, inner *net.IPNet) bool {
+	outerOnes, _ := outer.Mask.Size()
+	innerOnes, _ := inner.Mask.Size()
+	return outerOnes <= innerOnes && outer.Contains(inner.IP)
+}
+
+func overlaps(a, b *net.IPNet) bool {
+	return a.Contains(b.IP) || b.Contains(a.IP)
+}
+
+// checkV4Backstop refuses an outbound list that would stop blocking a private
+// range, or that allows a range firewall.default.sh always drops.
+func checkV4Backstop(rules []OutboundRule) error {
+	for _, priv := range privateV4 {
+		blocked := false
+		for _, r := range rules {
+			n, ok := ruleNet(r.CIDR)
+			if !ok || !covers(n, priv) {
+				continue
+			}
+			if r.Action == "allow" {
+				return fmt.Errorf("%w: allow %s would open all of %s - allow a narrower range or single host instead", ErrValidation, r.CIDR, priv)
+			}
+			blocked = true
+		}
+		if !blocked {
+			return fmt.Errorf("%w: %s must stay blocked (keep a block rule for it; put narrow allow exceptions above it)", ErrValidation, priv)
+		}
+	}
+	for _, r := range rules {
+		n, ok := ruleNet(r.CIDR)
+		if !ok || r.Action != "allow" {
+			continue
+		}
+		for _, fixed := range fixedBlockV4 {
+			if overlaps(n, fixed) {
+				return fmt.Errorf("%w: allow %s overlaps %s, which is always blocked", ErrValidation, r.CIDR, fixed)
+			}
+		}
+	}
+	return nil
+}
+
 // ReplaceOutbound overwrites the whole ordered outbound list in one call -
 // order is the entire point of this list (see OutboundRule's doc comment),
 // so index-based add/delete/reorder endpoints would just be a clunkier way
@@ -233,6 +314,9 @@ func ReplaceOutbound(path string, rules []OutboundRule) ([]OutboundRule, error) 
 		if err := validateCIDR("cidr", r.CIDR); err != nil {
 			return nil, err
 		}
+	}
+	if err := checkV4Backstop(rules); err != nil {
+		return nil, err
 	}
 	mu.Lock()
 	defer mu.Unlock()
