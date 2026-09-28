@@ -20,12 +20,29 @@ case "${NGINX_LOG_LEVEL:-errors}" in
         ;;
 esac
 
+# Every .env value below is pasted into nginx directives, so each entry must
+# be a plain token - a `;`, quote, brace or space would end the directive or
+# block it sits in and let the value write config of its own. An entry that
+# fails is skipped, loudly (ROUTER_INTERNAL_SUBNET aborts instead, see there).
+#   nginx_token host|cidr <value> <var name>
+nginx_token() {
+    # In a variable, and `]` first in the bracket: the only way to put
+    # brackets (IPv6 literals) in a bash ERE class without escaping games.
+    local host_re='^[][A-Za-z0-9_.*:-]+$'
+    case "$1" in
+        host) [[ "$2" =~ $host_re ]] && return 0 ;;
+        cidr) [[ "$2" =~ ^[0-9A-Fa-f:./]+$ || "$2" == "unix:" ]] && return 0 ;;
+    esac
+    echo "nginx-service: $3 entry '$2' is not a plain $1 - skipping it" >&2
+    return 1
+}
+
 if [ -n "${ALLOWED_HOSTS:-}" ]; then
     map_body="default 0;"
     IFS=',' read -ra allowed_hosts <<< "$ALLOWED_HOSTS"
     for host in "${allowed_hosts[@]}"; do
         host="$(echo "$host" | xargs)"
-        [ -n "$host" ] && map_body="$map_body
+        [ -n "$host" ] && nginx_token host "$host" ALLOWED_HOSTS && map_body="$map_body
     \"$host\" 1;"
     done
 else
@@ -40,7 +57,7 @@ if [ -n "${ALLOWED_EXPORT_HOSTS:-}" ]; then
     IFS=',' read -ra allowed_export_hosts <<< "$ALLOWED_EXPORT_HOSTS"
     for host in "${allowed_export_hosts[@]}"; do
         host="$(echo "$host" | xargs)"
-        [ -n "$host" ] && export_map_body="$export_map_body
+        [ -n "$host" ] && nginx_token host "$host" ALLOWED_EXPORT_HOSTS && export_map_body="$export_map_body
     \"$host\" 1;"
     done
 else
@@ -63,7 +80,7 @@ if [ -n "${TRUSTED_PROXIES:-}" ]; then
     IFS=',' read -ra trusted_proxies <<< "$TRUSTED_PROXIES"
     for proxy in "${trusted_proxies[@]}"; do
         proxy="$(echo "$proxy" | xargs)"
-        [ -n "$proxy" ] && directives="$directives
+        [ -n "$proxy" ] && nginx_token cidr "$proxy" TRUSTED_PROXIES && directives="$directives
     set_real_ip_from $proxy;"
     done
 fi
@@ -118,6 +135,12 @@ fi
 deny_internal_directive=""
 for internal_subnet in $internal_subnets; do
     [ -n "$internal_subnet" ] || continue
+    # Not skipped like the others: dropping an entry here would quietly
+    # narrow a deny, so refuse to start instead.
+    if ! nginx_token cidr "$internal_subnet" ROUTER_INTERNAL_SUBNET; then
+        echo "nginx-service: refusing to start with an unparseable ROUTER_INTERNAL_SUBNET" >&2
+        exit 1
+    fi
     deny_internal_directive="${deny_internal_directive}deny ${internal_subnet};
             "
 done
@@ -187,7 +210,7 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
     server_names=""
     for host in "${router_manager_hosts[@]}"; do
         host="$(echo "$host" | xargs)"
-        [ -n "$host" ] && server_names="$server_names $host"
+        [ -n "$host" ] && nginx_token host "$host" ROUTER_MANAGER_HOSTS && server_names="$server_names $host"
     done
     if [ -n "$server_names" ]; then
         export NGINX_ROUTER_MANAGER_SERVER_BLOCK="server {
@@ -278,7 +301,7 @@ if [ -n "${TINYAUTH_HOSTS:-}" ]; then
     tinyauth_server_names=""
     for host in "${tinyauth_hosts[@]}"; do
         host="$(echo "$host" | xargs)"
-        [ -n "$host" ] && tinyauth_server_names="$tinyauth_server_names $host"
+        [ -n "$host" ] && nginx_token host "$host" TINYAUTH_HOSTS && tinyauth_server_names="$tinyauth_server_names $host"
     done
 else
     tinyauth_server_names=""
