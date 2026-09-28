@@ -207,6 +207,17 @@ on — 실측: `auth.example.com`에서 로그인하면 `Domain=example.com`으�
 한 번으로 전부 커버됩니다. https 뒤에 있다면 `TINYAUTH_AUTH_SECURECOOKIE=true`도
 함께 켜는 걸 권장합니다(기본 false).
 
+그 대신 같은 부모 도메인 아래의 **모든** 호스트가 브라우저로부터 살아 있는 세션 쿠키를
+받습니다. 그래서 router는 프록시 대상에게 넘기기 전에 `tinyauth-*` 쿠키를 잘라냅니다.
+
+- Dev Proxy·App Routes·VNC(`/app/`)는 Caddy의 `forward_auth`가 인증을 확인한 뒤,
+  대상으로 가는 요청에서 뺍니다.
+- `ROUTER_VHOST_*`와 기본 upstream(code-docker)은 tinyauth 확인이 없으므로 nginx·Caddy가
+  바로 뺍니다.
+
+신뢰도가 낮은 백엔드가 그 쿠키를 가져가 다른 tinyauth 보호 경로에 재사용하는 길을 막기
+위해서입니다.
+
 사용자는 기본적으로 아무도 없는 상태로 시작합니다 — `/router/`(router-manager UI,
 "tinyauth" 탭 — webmanager에도 같은 탭이 있습니다)에서 사용자를 추가/삭제/비밀번호
 변경할 수 있고, 그때마다 자동으로

@@ -40,7 +40,7 @@ OLD_MIGRATION_VERSION=0
 # approutes.parseStructured.
 if [ "$OLD_MIGRATION_VERSION" -lt 1 ]; then
     if [ ! -e "$ADAPTER_DIR/apps/code.caddy" ]; then
-        printf 'handle_path /app/code/* {\n\treverse_proxy code-docker:80 {\n\t\theader_down Location "^(https?://[^/]+)/" "${1}/app/code/"\n\t}\n}\n' \
+        printf 'handle_path /app/code/* {\n\treverse_proxy code-docker:80 {\n\t\theader_down Location "^(https?://[^/]+)/" "${1}/app/code/"\n\t\theader_up Cookie "tinyauth-[^=;]*=[^;]*(; )?" ""\n\t}\n}\n' \
             > "$ADAPTER_DIR/apps/code.caddy"
     fi
 fi
@@ -153,7 +153,11 @@ ${CADDY_ADAPTER_TCP_BLOCK}
 
 :9997 {
 	bind unix//run/caddy-default.sock
-	reverse_proxy ${DEFAULT_UPSTREAM}
+	reverse_proxy ${DEFAULT_UPSTREAM} {
+		# Same tinyauth cookie strip as every managed fragment
+		# (devproxy.StripTinyauthCookies) - the default upstream needs none of it.
+		header_up Cookie "tinyauth-[^=;]*=[^;]*(; )?" ""
+	}
 }
 
 import ${ADAPTER_DIR}/custom/*.caddy

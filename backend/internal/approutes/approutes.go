@@ -126,6 +126,7 @@ func Render(a App) string {
 	}
 	fmt.Fprintf(&b, "\treverse_proxy %s {\n", a.Target)
 	fmt.Fprintf(&b, "\t\theader_down Location %q %q\n", locationRewriteSearch, locationRewriteReplace(a.Name))
+	fmt.Fprintf(&b, "\t\t%s\n", devproxy.StripTinyauthCookies)
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
 	return b.String()
@@ -164,6 +165,11 @@ func parseStructured(name, content string) (App, bool) {
 		return App{}, false
 	}
 	i++
+	// Optional so a fragment written before the cookie strip still parses and
+	// gets rewritten by Normalize (see devproxy.StripTinyauthCookies).
+	if i < len(body) && body[i] == "\t\t"+devproxy.StripTinyauthCookies {
+		i++
+	}
 	if i >= len(body) || body[i] != "\t}" {
 		return App{}, false
 	}

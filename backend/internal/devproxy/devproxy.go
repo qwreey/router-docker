@@ -226,7 +226,9 @@ func renderRoute(b *strings.Builder, rt Route) {
 	if rt.RewritePrefix != "" {
 		fmt.Fprintf(b, "\t\trewrite * %s{uri}\n", rt.RewritePrefix)
 	}
-	fmt.Fprintf(b, "\t\treverse_proxy %s\n", rt.Target)
+	fmt.Fprintf(b, "\t\treverse_proxy %s {\n", rt.Target)
+	fmt.Fprintf(b, "\t\t\t%s\n", StripTinyauthCookies)
+	b.WriteString("\t\t}\n")
 	b.WriteString("\t}\n")
 }
 
@@ -306,8 +308,19 @@ func parseRoute(body []string, i int) (Route, int, bool) {
 	if i >= len(body) || !strings.HasPrefix(body[i], "\t\treverse_proxy ") {
 		return Route{}, i, false
 	}
-	rt.Target = strings.TrimPrefix(body[i], "\t\treverse_proxy ")
-	i++
+	// Two shapes: the current block with StripTinyauthCookies, and the bare
+	// one-line form fragments had before it - still parsed, so Normalize can
+	// rewrite them to the current shape on the next start.
+	if target, ok := strings.CutSuffix(strings.TrimPrefix(body[i], "\t\treverse_proxy "), " {"); ok {
+		if i+2 >= len(body) || body[i+1] != "\t\t\t"+StripTinyauthCookies || body[i+2] != "\t\t}" {
+			return Route{}, i, false
+		}
+		rt.Target = target
+		i += 3
+	} else {
+		rt.Target = strings.TrimPrefix(body[i], "\t\treverse_proxy ")
+		i++
+	}
 	if i >= len(body) || body[i] != "\t}" {
 		return Route{}, i, false
 	}

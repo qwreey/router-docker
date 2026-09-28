@@ -2,6 +2,8 @@ package approutes
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -73,5 +75,33 @@ func TestUnknownForwardAuthRefusesStructuredParse(t *testing.T) {
 		"}\n"
 	if _, ok := parseStructured("vnc", raw); ok {
 		t.Fatal("parseStructured accepted an unrecognized forward_auth block")
+	}
+}
+
+// TestRenderStripsTinyauthCookies is App Routes' half of devproxy's test of
+// the same name (audit F21), plus the shell seed caddy-adapter writes for
+// the default "code" app, which must match Render byte for byte.
+func TestRenderStripsTinyauthCookies(t *testing.T) {
+	out := Render(App{Name: "code", Target: "code-docker:80"})
+	if !strings.Contains(out, "\t\t"+devproxy.StripTinyauthCookies+"\n") {
+		t.Fatalf("Render() has no tinyauth cookie strip:\n%s", out)
+	}
+	legacy := strings.Replace(out, "\t\t"+devproxy.StripTinyauthCookies+"\n", "", 1)
+	got, ok := parseStructured("code", legacy)
+	if !ok || Render(got) != out {
+		t.Fatalf("pre-strip fragment doesn't parse and re-render to the current shape: %+v, %v", got, ok)
+	}
+
+	script, err := os.ReadFile("../../../config/caddy-adapter/caddy-adapter.default.sh")
+	if err != nil {
+		t.Fatalf("read seed script: %v", err)
+	}
+	m := regexp.MustCompile(`printf '(handle_path /app/code/[^']*)'`).FindSubmatch(script)
+	if m == nil {
+		t.Fatalf("seed printf for the code app not found in caddy-adapter.default.sh")
+	}
+	seed := strings.NewReplacer(`\n`, "\n", `\t`, "\t").Replace(string(m[1]))
+	if seed != out {
+		t.Fatalf("caddy-adapter seed and Render disagree:\nseed:\n%s\nrender:\n%s", seed, out)
 	}
 }

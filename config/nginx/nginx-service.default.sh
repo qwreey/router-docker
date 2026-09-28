@@ -522,11 +522,10 @@ $vhost_pwa_block
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$router_forwarded_proto;
             # A vhost target is a whole separate origin, so it never has a
-            # legitimate reason to see router-manager's admin unlock cookie
-            # - stripped here for the same reason /exports/ and /app/ strip
-            # it, even though a separate origin means the browser usually
-            # would not attach it in the first place.
-            proxy_set_header Cookie \$router_manager_cookie_stripped;
+            # legitimate reason to see router-manager's admin unlock cookie,
+            # nor tinyauth's parent-domain session (no tinyauth check runs
+            # here) - see \$upstream_cookie_stripped in nginx.default.conf.
+            proxy_set_header Cookie \$upstream_cookie_stripped;
         }
     }"
 done

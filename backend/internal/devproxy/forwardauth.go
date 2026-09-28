@@ -126,3 +126,13 @@ func matchLines(body []string, i int, want []string) bool {
 	}
 	return true
 }
+
+// StripTinyauthCookies is the reverse_proxy subdirective every managed
+// fragment puts on its backend hop. tinyauth scopes its session cookie to the
+// parent domain (measured on v5: `Domain=example.test` for an app URL of
+// auth.example.test), so the browser sends a live session to every host under
+// it. forward_auth still sees the cookie - it is its own request, made before
+// this one - but the proxied target never does, so a low-trust backend can't
+// replay it against other tinyauth-protected routes. Removes every
+// tinyauth-* cookie and leaves the rest.
+const StripTinyauthCookies = `header_up Cookie "tinyauth-[^=;]*=[^;]*(; )?" ""`

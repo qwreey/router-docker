@@ -2,6 +2,7 @@ package devproxy
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +52,30 @@ func TestParseLegacyForwardAuth(t *testing.T) {
 	}
 	if Render(got) == legacy {
 		t.Fatal("Render reproduced the legacy block - Normalize would never repair anything")
+	}
+}
+
+// TestRenderStripsTinyauthCookies is the regression test for the 2026-09-16
+// audit's F21: tinyauth's session cookie is scoped to the parent domain, so
+// every Dev Proxy target received a live session in its Cookie header.
+// Fragments written before the strip must still parse, so Normalize can
+// upgrade them in place.
+func TestRenderStripsTinyauthCookies(t *testing.T) {
+	e := Expose{Name: "x", Host: "x.example.test", Routes: []Route{{Mode: "handle", Target: "code-docker:3000", RequireAuth: true}}}
+	out := Render(e)
+	if !strings.Contains(out, "\t\t\t"+StripTinyauthCookies+"\n") {
+		t.Fatalf("Render() has no tinyauth cookie strip:\n%s", out)
+	}
+	if got, ok := parseStructured("x", out); !ok || got.Routes[0].Target != "code-docker:3000" {
+		t.Fatalf("parseStructured(Render()) = %+v, %v", got, ok)
+	}
+
+	legacy := strings.Replace(out, " {\n\t\t\t"+StripTinyauthCookies+"\n\t\t}\n", "\n", 1)
+	got, ok := parseStructured("x", legacy)
+	if !ok || got.Routes[0].Target != "code-docker:3000" || !got.Routes[0].RequireAuth {
+		t.Fatalf("pre-strip fragment no longer parses: %+v, %v\n%s", got, ok, legacy)
+	}
+	if Render(got) != out {
+		t.Fatalf("pre-strip fragment doesn't re-render to the current shape")
 	}
 }
