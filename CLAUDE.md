@@ -564,6 +564,20 @@ location (`config/nginx/nginx.default.conf`, also serving the built SPA — see
 The old per-feature code-docker-nginx locations (`/tailscale/`, `/dev-proxy/`,
 `/router-auth/`) are gone — code-docker isn't even attached to `code-docker-external`
 anymore, so it was never a legitimate proxy point for this.
+**The whole front door (tcp 80) accepts only the outward-facing interface and `lo`**
+(2026-09-28, `script/netgate-entrypoint.sh`'s `guard_front_door`, toggle
+`ROUTER_FRONTDOOR_EXTERNAL_ONLY`): an iptables `ROUTER-FRONTDOOR` chain, applied
+synchronously before supervisord starts nginx, lets port 80 in only on the interface
+carrying the default route (`code-docker-external` — published `ports:` land there too,
+since `internal: true` networks are never port-publish targets, measured) and on loopback
+(tailscaled's netstack). Every other network router is attached to exists for router to be
+a *gateway* or a VNC relay, and nginx on `0.0.0.0:80` made router a way back in from all of
+them: a fetcher on code-docker-firecrawl's isolated network got code-server from
+`http://router/` and a `/code` listing from webmanager's API. Interface-keyed rather than
+nginx `listen <ip>` because a single wildcard `listen 80` added to any server block later
+would silently reopen the IP-based version. Failing to apply it exits the container rather
+than serving an open front door. The per-location deny below predates it and stays as a
+second layer.
 **Every location that proxies to that socket denies `code-docker-internal` source
 addresses** (`ROUTER_NGINX_DENY_INTERNAL_MANAGER`, default on, 2026-09-07 security
 review finding C2) — the shared hostname's `/router/` in `nginx.default.conf` *and*

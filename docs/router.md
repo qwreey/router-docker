@@ -28,6 +28,18 @@
 [`.claude/functional-router-plan.md`](../.claude/functional-router-plan.md)에
 정리되어 있습니다.
 
+## 앞문은 바깥쪽 망에서만 열립니다
+
+router의 80번(code-server, webmanager, App Routes, Dev Proxy, vhost가 전부 이 뒤에
+있음)은 **기본 경로가 걸린 바깥쪽 망(`code-docker-external`)과 loopback에서만** 받습니다.
+router가 게이트웨이나 VNC 중계 역할로 붙어 있는 다른 망 — `code-docker-internal`, 그리고
+사이드 프로젝트가 만든 격리망 — 에서 오는 연결은 거부됩니다. 그렇지 않으면 격리망에
+넣어둔 크롤러나 브라우저가 router를 거쳐 code-server/webmanager로 되돌아 들어올 수
+있습니다(2026-09-28 실측). 호스트의 `ports:` 포워딩은 바깥쪽 망으로 들어오므로 영향이
+없고, 바깥 리버스 프록시는 publish된 포트나 router의 `code-docker-external` 쪽 IP로
+붙이면 됩니다. 끄는 방법과 포트 목록은 `example-env.router`의
+`ROUTER_FRONTDOOR_EXTERNAL_ONLY`/`ROUTER_FRONTDOOR_PORTS` 참고.
+
 tailscale/Dev Proxy/App Routes/VNC/DNS/Net 관리/tinyauth/설정(router-manager 자체
 비밀번호 설정)은 전부 webmanager의 해당 탭에서도 관리할 수 있고, `http://<host>/router/`를
 직접 열면 webmanager 없이도 같은 화면을 쓸 수 있습니다 — 자세한 내용은 아래
