@@ -23,17 +23,24 @@ from (it was `code-docker-netgate`, living inside code-docker itself,
 before being promoted first to a subtree and then to this standalone repo).
 Don't re-derive decisions already recorded there.
 
-Brought into code-docker as a git submodule at `router/`, with its own
-`docker-compose.router.yml` that code-docker's own `docker-compose.yml`
-includes by a fixed path — see code-docker's own `CLAUDE.md` for how the
+Consumed by code-docker as a **remote Compose include** of this repo's
+`docker-compose.router.yml`, pinned to a release tag
+(`https://github.com/qwreey/router-docker.git#<tag>:docker-compose.router.yml`,
+`ROUTER_REF` in code-docker's `.env`; developed from a local clone at code-docker's
+`dev/router-docker`, via `ROUTER_INCLUDE`) — it used to be a git submodule at
+`router/`. So a change here reaches code-docker only through a **new tag**; Compose
+caches each fetch under its commit sha, which is also why a commit-sha ref does not
+work there (measured: it leaves an empty cache dir and fails with `stat ... no such
+file`) — see code-docker's own `CLAUDE.md` for how the
 two fit together (network topology, shared env vars like
 `ROUTER_HOSTNAME`/`NETGATE_ENABLED`). This repo also builds and runs
 standalone (`docker build .`, or `docker compose -f
 docker-compose.router.yml` against an existing `code-docker-internal`/
 `code-docker-external` network pair) for anyone using it outside
 code-docker — confirmed via a clean `docker build .` from a fresh clone.
-Carries its own `envmigrate` submodule (`envmigrate/`,
-`vendor-envmigrate.sh`) rather than depending on anything outside this repo.
+Depends on `github.com/qwreey/envmigrate` as an ordinary tagged Go module (it used
+to carry its own submodule copy plus a `vendor-envmigrate.sh` step); bump it with
+`go get github.com/qwreey/envmigrate@<tag>` in `backend/`.
 
 ## Current state
 

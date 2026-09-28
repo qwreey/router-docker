@@ -6,8 +6,8 @@ egress lockdown (DNS-level content blocklist, RFC1918/CIDR filtering), tailscale
 browser VNC viewer (noVNC served by router itself, bridging the target's RFB port), and a
 router-manager admin API/SPA (`/router/`) covering all of it.
 
-Brought into code-docker as a git submodule at `router/`, with its own
-`docker-compose.router.yml` that code-docker's own `docker-compose.yml` includes — see
+Consumed by code-docker as a remote Compose include of this repo's
+`docker-compose.router.yml`, pinned to a release tag — see
 code-docker's own `CLAUDE.md` for how the two fit together (network topology, shared env
 vars like `ROUTER_HOSTNAME`/`NETGATE_ENABLED`). This repo also builds and runs standalone
 (`docker build .` / `docker compose -f docker-compose.router.yml` against an existing

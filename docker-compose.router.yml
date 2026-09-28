@@ -2,9 +2,10 @@
 # by a fixed path (not the optional EXTRA_INCLUDE hook - router is core, always-present
 # topology, not an opt-in sibling) instead of defining code-docker-router inline. Paths
 # below (build.context, volumes' bind-mount source) resolve relative to THIS file's own
-# location, same as any Compose file - since this file always lives inside the router/
-# submodule/subtree, `context: .` means "router/ itself" regardless of where the
-# including docker-compose.yml physically sits (see its own BUILD_CONTEXT comment for
+# location, same as any Compose file - `context: .` means "this repo's root" whether
+# the file is a local checkout or a remote include (Compose clones a remote include
+# into ~/.cache/docker-compose/<commit sha>/ and resolves from there, measured),
+# regardless of where the including docker-compose.yml physically sits (see its own BUILD_CONTEXT comment for
 # why that matters in the split-directory deploy).
 #
 # code-docker's own docker-compose.yml still declares code-docker-internal/

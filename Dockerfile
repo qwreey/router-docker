@@ -32,6 +32,10 @@ FROM golang:1.25-alpine AS router-manager-build
 WORKDIR /src
 COPY backend/go.mod ./
 COPY backend/go.sum ./
+# envmigrate is a normal tagged module now (github.com/qwreey/envmigrate), not a
+# submodule + vendor/ copy, so dependencies download like any Go build. Kept in
+# its own layer before the sources so a code-only change doesn't re-download.
+RUN go mod download
 COPY backend/main.go ./
 COPY backend/hashpassword.go ./
 COPY backend/envmigratecmd.go ./
@@ -47,12 +51,6 @@ COPY backend/handlers_envversion.go ./
 COPY backend/handlers_vhostpwa.go ./
 COPY backend/static.go ./
 COPY backend/internal ./internal
-# router's build context is router/ only (see router/CLAUDE.md), so it can't
-# COPY the repo-root envmigrate/ module directly the way webmanager's own
-# Dockerfile stage does - backend/vendor/ (see repo-root vendor-envmigrate.sh)
-# is a `go mod vendor`-materialized copy that lives inside this context
-# instead. `go build` auto-detects and uses vendor/ when present/consistent.
-COPY backend/vendor ./vendor
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /router-manager .
 
 # router/frontend's own SPA build (AppRoutes/DevProxy/Tailscale/설정 tabs,

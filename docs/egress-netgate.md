@@ -265,7 +265,7 @@ netgate 설정이 아무리 정상이어도 절대 성공할 수 없습니다. `
 `code-docker-netinit-docker`라는 전용 컨테이너(2026-08-25 이전 이름은
 `code-docker-netfilter-fix` - qwreey/router-docker-client 저장소 안에서도 `netfilter-fix/`
 서브디렉터리가 `netinit-docker/`로, `fix.sh`가 `netinit-docker.sh`로 그대로 개명됐습니다.
-`router/`/`code-dind`처럼 이 저장소의 git submodule은 아니고, `netinit`과 마찬가지로
+`netinit`과 마찬가지로
 그 저장소에서 직접 받아오는 원격 git 빌드 컨텍스트입니다 - 위 "아키텍처" 절과 code-docker의
 `docker-compose.yml` 참고)가 `docker-compose.yml`에 포함되어 있고, `docker compose up`만으로
 자동으로 같이 떠서 이 문제를 해결합니다 - 별도 설치 단계가 없습니다. 이 컨테이너는 이제 이
