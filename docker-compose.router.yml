@@ -76,6 +76,20 @@ services:
         limits:
           cpus: "${ROUTER_CPU_LIMIT:-0}"
           memory: "${ROUTER_MEM_LIMIT:-0}"
+    # Everything here runs under supervisord, which keeps the container `Up` even when
+    # nginx/router-manager/netgate have all died. Healthy = every program is RUNNING
+    # or STOPPED (only ever on purpose) - a feature switched off still counts as
+    # RUNNING, since its script idles on `sleep infinity` rather than exiting.
+    # BACKOFF/FATAL/EXITED, or supervisord not answering, is unhealthy. $$ (not $) so
+    # Compose leaves awk's fields alone.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "supervisorctl status | awk '$$2 != \"RUNNING\" && $$2 != \"STOPPED\" { bad = 1; print } END { exit bad || NR == 0 }'"
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     # volumes: (ROUTER_VOLUME's bind-mount source) is declared in code-docker's own
     # docker-compose.yml, not here - same reason as env_file above: a relative
     # `./data/router` path needs to resolve against wherever the top-level compose file
