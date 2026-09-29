@@ -52,7 +52,8 @@ func validateName(name string) error {
 }
 
 // shellQuote wraps s in single quotes for safe embedding in a POSIX shell
-// `source`d file, escaping any embedded single quote as '\''.
+// `source`d file. An embedded single quote closes the quoted string, is
+// added as an escaped \', and the string is reopened.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
