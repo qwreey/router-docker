@@ -11,13 +11,11 @@
 // existing prefers-color-scheme media query.
 export type EmbedTheme = 'light' | 'dark' | 'system'
 
-// Messages from an unexpected origin are ignored by shape, not by
-// event.origin allow-listing - the parent's own hostname isn't known to this
-// bundle ahead of time (it's whatever ROUTER_MANAGER_HOSTS ends up being,
-// operator-configured), and the only thing a forged message could do is
-// flip the color scheme, which isn't worth the extra plumbing to fully lock
-// down. The distinguishing `source` marker just keeps this from misfiring on
-// unrelated postMessage traffic (browser extensions, devtools bridges, etc).
+// Incoming theme messages are accepted only from the embedding parent
+// window, and from its origin when RouterFrame.tsx passed one in ?origin=
+// (see parentOrigin below). The `source` marker keeps this from misfiring on
+// the parent's own unrelated postMessage traffic (extensions, devtools
+// bridges, etc).
 const MESSAGE_SOURCE = 'code-docker-router-embed'
 
 function isEmbedTheme(v: unknown): v is EmbedTheme {
@@ -48,6 +46,9 @@ export function initEmbedTheme(): EmbedTheme {
 // theme while a tab is already embedded. Returns a cleanup function.
 export function listenForEmbedThemeMessages(): () => void {
   function onMessage(event: MessageEvent) {
+    if (window.parent === window || event.source !== window.parent) return
+    const origin = parentOrigin()
+    if (origin && event.origin !== origin) return
     const data = event.data
     if (!data || typeof data !== 'object' || data.source !== MESSAGE_SOURCE || data.type !== 'theme') return
     if (isEmbedTheme(data.theme)) applyEmbedTheme(data.theme)
@@ -61,10 +62,9 @@ export function listenForEmbedThemeMessages(): () => void {
 // instead of waiting on the onLoad+200ms/3s-hard-cap timers alone - onLoad
 // only means "the iframe's own HTML/JS/CSS finished loading", not "the
 // React app inside rendered anything yet". Target '*' rather than a fixed
-// origin, same reasoning as the incoming-message check above: this bundle
-// doesn't know webmanager's origin ahead of time (operator-configured via
-// ROUTER_MANAGER_HOSTS on the *other* side), and the only thing riding on
-// this message is a UI-timing signal, not anything sensitive. No-op outside
+// origin: it has to go out before anything else and the ?origin= param may be
+// absent, and the only thing riding on this message is a UI-timing signal,
+// not anything sensitive. No-op outside
 // an iframe (window.parent === window), so this is safe to call
 // unconditionally.
 export function notifyEmbedReady() {
