@@ -104,6 +104,13 @@ func writeVncError(w http.ResponseWriter, err error) {
 // and noVNC's own reconnect loop will try again.
 const dialTimeout = 10 * time.Second
 
+// vncBridgeSlots caps how many RFB bridges run at once, across every
+// target. Each one holds a websocket, a TCP connection and goroutines for
+// as long as the viewer stays open, so without a cap an authenticated
+// caller could open them until router runs out of file descriptors. 32 is
+// far past what a person has open at once.
+var vncBridgeSlots = make(chan struct{}, 32)
+
 // realClientIP is clientKey's counterpart for the VNC connected-clients
 // registry below: it prefers the client IP nginx hands over
 // (X-Real-IP, then the first hop of X-Forwarded-For) and only falls back to
@@ -387,6 +394,14 @@ func handleVncSocket(w http.ResponseWriter, r *http.Request) {
 		// browser's network tab shows a real reason instead of a socket
 		// that just closes.
 		writeError(w, http.StatusForbidden, "disconnected from this vnc target by an operator - wait a few seconds before reconnecting")
+		return
+	}
+
+	select {
+	case vncBridgeSlots <- struct{}{}:
+		defer func() { <-vncBridgeSlots }()
+	default:
+		writeError(w, http.StatusServiceUnavailable, "too many vnc connections are open - close another viewer and retry")
 		return
 	}
 
