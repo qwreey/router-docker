@@ -129,6 +129,17 @@ func parseHostsList(content string) []string {
 	return hosts
 }
 
+// lowerHosts folds hostnames to lower case before they're stored: DNS names
+// are case-insensitive, so "Example.com" and "example.com" are one entry,
+// and deduping them as two strings would keep both.
+func lowerHosts(hosts []string) []string {
+	out := make([]string, len(hosts))
+	for i, h := range hosts {
+		out[i] = strings.ToLower(h)
+	}
+	return out
+}
+
 func dedupe(hosts []string) []string {
 	seen := make(map[string]bool, len(hosts))
 	out := make([]string, 0, len(hosts))
@@ -250,7 +261,7 @@ func CreateSource(name string, hosts []string) error {
 	if _, err := os.Stat(customPath(name)); err == nil {
 		return ErrSourceExists
 	}
-	return atomicfile.Write(customPath(name), []byte(renderHostsFile(dedupe(hosts))), 0o644, 0o755)
+	return atomicfile.Write(customPath(name), []byte(renderHostsFile(dedupe(lowerHosts(hosts)))), 0o644, 0o755)
 }
 
 // UpdateSource overwrites an existing custom source's host list.
@@ -268,7 +279,7 @@ func UpdateSource(name string, hosts []string) error {
 	if _, err := os.Stat(customPath(name)); err != nil {
 		return ErrSourceNotFound
 	}
-	return atomicfile.Write(customPath(name), []byte(renderHostsFile(dedupe(hosts))), 0o644, 0o755)
+	return atomicfile.Write(customPath(name), []byte(renderHostsFile(dedupe(lowerHosts(hosts)))), 0o644, 0o755)
 }
 
 // DeleteSource removes a custom source.

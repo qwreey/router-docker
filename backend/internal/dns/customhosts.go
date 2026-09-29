@@ -71,8 +71,13 @@ func ListCustomHosts() ([]HostEntry, error) {
 // applies to its own few fields. Re-renders CustomHostsRenderedPath so the
 // change takes effect on the caller's subsequent `dns` program restart.
 func SetCustomHosts(entries []HostEntry) error {
+	// Case-folded for the same reason as lowerHosts: otherwise "Example.com"
+	// and "example.com" pass as two hosts with two different addresses.
+	entries = append([]HostEntry(nil), entries...)
 	seen := make(map[string]bool, len(entries))
-	for _, e := range entries {
+	for i := range entries {
+		entries[i].Host = strings.ToLower(entries[i].Host)
+		e := entries[i]
 		if err := ValidateHostEntry(e); err != nil {
 			return err
 		}
