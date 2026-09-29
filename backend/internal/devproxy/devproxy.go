@@ -137,12 +137,14 @@ func ValidateName(name string) error {
 	return nil
 }
 
-var hostRe = regexp.MustCompile(`^[a-zA-Z0-9*.-]+$`)
+var hostRe = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$`)
 
 // ValidateHost checks host is a safe Caddyfile `host` matcher argument — a
 // plain hostname, optionally with a leading "*." wildcard label (Caddy's own
 // host-matcher wildcard syntax). Dots are allowed here (unlike ValidateName)
-// since this is a real external domain, not an internal identifier.
+// since this is a real external domain, not an internal identifier. A "*"
+// anywhere else ("*", "*.*") is refused: this matcher is what keeps other
+// domains out of /exports/, which router's nginx exempts from ALLOWED_HOSTS.
 func ValidateHost(host string) error {
 	if host == "" || !hostRe.MatchString(host) {
 		return errors.New("host must be a plain hostname (letters, digits, dots, hyphens, optional leading \"*.\")")

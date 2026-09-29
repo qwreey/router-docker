@@ -125,6 +125,9 @@ server {
 않습니다 — expose의 host 필드나 라우트 path/target 설정은 지금까지와
 완전히 동일하게 적으면 됩니다.
 
+`/exports/`에는 code-server/webmanager용 `ALLOWED_HOSTS`가 적용되지 않습니다 — Dev
+Proxy는 여기 등록한 호스트에만 응답하고 나머지는 404이므로, 등록 목록 자체가 허용
+목록입니다(호스트를 바꿀 때마다 `.env` 수정과 재시작이 필요하지 않게).
 `ALLOWED_EXPORT_HOSTS`(`example-env.router`, 기본 빈 값)로 `/exports/`가 받아들일
 Host를 code-server/webmanager용 `ALLOWED_HOSTS`와 별도로 제한할 수 있습니다
 — dev-proxy 도메인은 code-server 도메인보다 훨씬 자주 바뀌는 편이라 따로
