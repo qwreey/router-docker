@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/png"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -146,6 +147,11 @@ func upstreamOf(vhostValue string) (string, bool) {
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
+// maxManifestBytes bounds how much of the upstream's response is decoded.
+// A real manifest is a few KB; the upstream is whatever app the vhost
+// points at, so it shouldn't get to make router buffer an arbitrary body.
+const maxManifestBytes = 1 << 20
+
 // Patch fetches the app's own manifest and returns it with the declared keys
 // replaced. Any failure is an error and nothing else: the caller answers a
 // bare 502 so nginx falls back to the unmodified manifest, which still
@@ -162,7 +168,7 @@ func Patch(o Override) ([]byte, error) {
 	}
 
 	var manifest map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxManifestBytes)).Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("vhostpwa: parse manifest from %s: %w", url, err)
 	}
 
