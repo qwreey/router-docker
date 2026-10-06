@@ -20,8 +20,10 @@ services:
     container_name: "${PREFIX:-}code-docker-router"
     hostname: code-docker-router
     build:
+      # No `network: host`: buildx 0.37.2+ refuses it without the network.host
+      # entitlement, which `docker compose build` can't grant. BuildKit's own
+      # bridge network resolves names fine, Tailscale/MagicDNS hosts included.
       context: .
-      network: host
     restart: unless-stopped
     environment:
       # Same behavioral opt-out as code-docker/dind's own NETGATE_ENABLED -
@@ -76,6 +78,9 @@ services:
         limits:
           cpus: "${ROUTER_CPU_LIMIT:-0}"
           memory: "${ROUTER_MEM_LIMIT:-0}"
+    # Memory+swap combined; "0" leaves Docker's default (swap as large as the
+    # memory limit). See code-docker's example-env.
+    memswap_limit: "${ROUTER_MEMSWAP_LIMIT:-0}"
     # Everything here runs under supervisord, which keeps the container `Up` even when
     # nginx/router-manager/netgate have all died. Healthy = every program is RUNNING
     # or STOPPED (only ever on purpose) - a feature switched off still counts as
