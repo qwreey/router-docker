@@ -241,7 +241,8 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   - `rfb` (2026-08-27, the default): **router serves noVNC itself** — vendored into the
     image at `/opt/novnc` (pinned `NOVNC_VERSION` ARG, plus the "never request a 0x0
     desktop" patch roblox-studio-docker used to carry on its own copy, now in one place
-    for every target) and served by router-manager at `/router/novnc/`, with
+    for every target; two more resize patches follow it, described where the Dockerfile
+    applies them) and served by router-manager at `/router/novnc/`, with
     `GET /api/vnc/targets/{name}/ws` bridging the browser's WebSocket to the target's
     **raw RFB port** (`handleVncSocket`, `github.com/coder/websocket` +
     `websocket.NetConn` + two `io.Copy`s). The target only has to speak RFB — the same

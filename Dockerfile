@@ -177,9 +177,21 @@ RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSIO
 # match. A viewer that isn't allowed to resize (wayvnc lets only the client
 # that resized first do it, until that one disconnects) gets one refusal per
 # change, not a loop - the refusal path never re-checks.
+#
+# Third patch (config/novnc/hidden-viewer.sed): no remote resize while the viewer can't be
+# seen. An editor tab in code-server holding a viewer, once another tab is active, hid
+# it with its frame shrunk to an iframe's default 300x150 - not 0x0, so the guard above
+# let it through - and the desktop stayed that small until someone looked again, which
+# left an agent capturing Studio a 300x150 screen. Reproduced with same-origin nested
+# frames hidden that way: 300x150 before, the previous size kept with this.
+COPY config/novnc/hidden-viewer.sed /tmp/novnc-hidden-viewer.sed
 RUN sed -i '/_requestRemoteResize() {/,/^    }$/ s#^\( *\)const size = this\._screenSize();#\1const size = this._screenSize();\n\1// PATCHED (router-docker): never request a 0x0 desktop - see Dockerfile.\n\1if (size.w < 1 || size.h < 1) { return; }#' /opt/novnc/core/rfb.js \
     && sed -i 's#^\( *\)if (this\._FBU\.x === 1 \&\& this\._FBU\.y === 0) {$#\1// PATCHED (router-docker): also re-check after a server-side resize - see Dockerfile.\n\1if ((this._FBU.x === 1 \&\& this._FBU.y === 0) || this._FBU.x === 0) {#' /opt/novnc/core/rfb.js \
-    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 2
+    && sed -i -f /tmp/novnc-hidden-viewer.sed /opt/novnc/core/rfb.js \
+    && rm /tmp/novnc-hidden-viewer.sed \
+    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 5 \
+    && grep -q 'this._viewObserver.observe(document.documentElement)' /opt/novnc/core/rfb.js \
+    && grep -q 'this._viewObserver.disconnect()' /opt/novnc/core/rfb.js
 
 COPY --from=router-manager-build /router-manager /usr/local/bin/router-manager
 COPY --from=router-frontend-build /src/dist /etc/router/router-manager/static
