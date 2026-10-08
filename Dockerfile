@@ -162,8 +162,24 @@ RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSIO
 # survive a NOVNC_VERSION bump legibly - the trailing `test` is what makes a
 # bump that moves this code *fail the build* instead of silently dropping
 # the guard.
+#
+# Second patch: catch up with a resize that came in while one was pending.
+# noVNC sends one SetDesktopSize at a time and drops any viewport change made
+# while a request is outstanding, relying on re-checking once the reply says
+# "done" (status 0). neatvnc (wayvnc's server library) never says done: it
+# answers "request forwarded" (status 4, which noVNC also logs as "did not
+# accept ... Unknown reason") and reports the actual change afterwards as a
+# server-side one (reason 0). So a viewport that changed twice within a few
+# milliseconds - a window maximize, the widget's maximize button - kept the
+# first size, a little off, until the next resize (8 of 12 measured runs at
+# 5-30 ms between the two changes; 0 of 12 with this). Re-checking on a
+# server-side change too is cheap: it returns early when the sizes already
+# match. A viewer that isn't allowed to resize (wayvnc lets only the client
+# that resized first do it, until that one disconnects) gets one refusal per
+# change, not a loop - the refusal path never re-checks.
 RUN sed -i '/_requestRemoteResize() {/,/^    }$/ s#^\( *\)const size = this\._screenSize();#\1const size = this._screenSize();\n\1// PATCHED (router-docker): never request a 0x0 desktop - see Dockerfile.\n\1if (size.w < 1 || size.h < 1) { return; }#' /opt/novnc/core/rfb.js \
-    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 1
+    && sed -i 's#^\( *\)if (this\._FBU\.x === 1 \&\& this\._FBU\.y === 0) {$#\1// PATCHED (router-docker): also re-check after a server-side resize - see Dockerfile.\n\1if ((this._FBU.x === 1 \&\& this._FBU.y === 0) || this._FBU.x === 0) {#' /opt/novnc/core/rfb.js \
+    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 2
 
 COPY --from=router-manager-build /router-manager /usr/local/bin/router-manager
 COPY --from=router-frontend-build /src/dist /etc/router/router-manager/static
