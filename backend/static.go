@@ -70,6 +70,13 @@ func staticHandler(dir string) http.Handler {
 //     spelled out separately: http.StripPrefix("/novnc/") turns a request
 //     for exactly "/novnc/" into "", which has no trailing slash to test - and
 //     that is precisely the request that lists the whole tree.
+//   - Cache-Control: no-cache on everything. The Dockerfile patches
+//     core/rfb.js at build time, under the same URL every time, and its
+//     modules are loaded by import with no version in the path. Without a
+//     Cache-Control header a browser may reuse a cached copy without asking
+//     for up to a tenth of its age (heuristic freshness) - hours after a
+//     rebuild, so a viewer can keep running the previous patch set. no-cache
+//     still lets it revalidate with If-Modified-Since and get a 304.
 //
 // Deliberately NOT behind the auth gate even when one is configured: this
 // is upstream noVNC's own static JS and HTML, identical for every
@@ -82,6 +89,7 @@ func novncHandler(dir string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		fileServer.ServeHTTP(w, r)
 	})
 }
