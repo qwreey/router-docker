@@ -114,8 +114,8 @@ export function VncClientsPanel({
         {confirmKick && (
           <>
             <code>{confirmKick.remoteIp}</code> ({vncClientLabel(confirmKick.userAgent)})의 화면 연결을 끊습니다.
-            그 클라이언트가 열어둔 뷰어가 자동으로 재접속하지 못하도록 잠시 동안 재연결도 함께 막습니다 — 브라우저
-            탭 자체를 강제로 닫지는 못합니다.
+            그 뷰어는 스스로 다시 붙지 않고, 그쪽에서 연결 버튼을 누르거나 새로고침해야 돌아옵니다 — 브라우저 탭
+            자체를 강제로 닫지는 못합니다.
           </>
         )}
       </ConfirmDialog>

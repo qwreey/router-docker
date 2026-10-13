@@ -175,7 +175,7 @@ type vncConn struct {
 	remoteIP    string
 	userAgent   string
 	connectedAt time.Time
-	conn        net.Conn // the *websocket.NetConn wrapper - Close() unblocks the bridge's io.Copy exactly like a network failure would.
+	ws          *websocket.Conn // closing it unblocks the bridge's io.Copy exactly like a network failure would.
 }
 
 // vncClientInfo is the wire shape for GET .../clients. vncConn itself is
@@ -201,11 +201,11 @@ var (
 // registerVncConn records a newly-accepted client and returns its handle.
 // Called right after the WebSocket upgrade in handleVncSocket, deregistered
 // via that function's own defer.
-func registerVncConn(target, remoteIP, userAgent string, conn net.Conn) *vncConn {
+func registerVncConn(target, remoteIP, userAgent string, ws *websocket.Conn) *vncConn {
 	vncConnMu.Lock()
 	defer vncConnMu.Unlock()
 	nextVncConnID++
-	c := &vncConn{id: nextVncConnID, remoteIP: remoteIP, userAgent: userAgent, connectedAt: time.Now(), conn: conn}
+	c := &vncConn{id: nextVncConnID, remoteIP: remoteIP, userAgent: userAgent, connectedAt: time.Now(), ws: ws}
 	if vncConnsByTarget[target] == nil {
 		vncConnsByTarget[target] = map[int64]*vncConn{}
 	}
@@ -223,16 +223,23 @@ func deregisterVncConn(target string, id int64) {
 	}
 }
 
+// vncCloseKicked is the WebSocket close code handleDeleteVncClient ends a
+// viewer with (4000-4999 is the private-use range). router's noVNC reads it
+// (config/novnc/kicked-viewer.sed) and stays disconnected instead of
+// reconnecting: the target's novncQuery always sets reconnect=1, and noVNC
+// retries forever, so without it a viewer left open somewhere else is back
+// as soon as nothing refuses it. The person at that viewer gets noVNC's own
+// connect button back and can reconnect by hand.
+const vncCloseKicked websocket.StatusCode = 4001
+
 // vncKickWindow is how long a client just disconnected via
-// handleDeleteVncClient is refused a new connection to the same target.
-// This exists because of a problem the connection registry alone doesn't
-// solve: internal/vnc's novncQuery always sets reconnect=1, so a bare
-// Close() on the stored conn makes the still-open noVNC tab reconnect
-// almost immediately - the "끊기" button would appear to do nothing at all,
-// since the same client is back in the list before the panel even
-// refreshes. 15s is comfortably longer than noVNC's own reconnect backoff
-// (a few seconds) but short enough that a legitimate reconnect after a real
-// network blip isn't mistaken for the just-kicked client for long.
+// handleDeleteVncClient is refused a new connection to the same target. It
+// covers a viewer that doesn't know vncCloseKicked - a tab still running a
+// noVNC it loaded before that patch - which reconnects a few seconds after
+// any close. For that one the button is a pause of this length, not a
+// disconnect: it comes back once the window is over. Kept short so a
+// current viewer's own "connect" click, or a reconnect after a real network
+// blip, isn't refused for long.
 const vncKickWindow = 15 * time.Second
 
 // vncKickKey identifies one target+client pairing for the kick window
@@ -245,11 +252,9 @@ const vncKickWindow = 15 * time.Second
 // just for this.
 //
 // This does NOT separate two tabs of the *same* browser on the same
-// machine - they share both IP and User-Agent, so kicking one kicks both.
-// That's deliberately fine: two same-browser tabs open on one target is
-// exactly the "두 클라이언트가 desktop 크기를 두고 싸운다" case Vnc.tsx's own
-// "새 창으로 옮기기" handoff exists to avoid, so treating them as one unit
-// to kick together matches how this UI already treats them everywhere else.
+// machine - they share both IP and User-Agent. Only the chosen connection is
+// closed, so the other tab stays connected; it just can't reconnect either
+// until the window is over, should it drop in the meantime.
 type vncKickKey struct {
 	target    string
 	ip        string
@@ -322,9 +327,9 @@ func handleListVncClients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// handleDeleteVncClient closes one client's bridged connection and starts
-// its vncKickWindow. Gated like the socket route itself - disconnecting
-// someone is at least as sensitive as connecting.
+// handleDeleteVncClient closes one client's bridged connection with
+// vncCloseKicked and starts its vncKickWindow. Gated like the socket route
+// itself - disconnecting someone is at least as sensitive as connecting.
 func handleDeleteVncClient(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -339,11 +344,10 @@ func handleDeleteVncClient(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such client")
 		return
 	}
-	// Recorded before Close(): see vncKickWindow's doc comment for why the
-	// window has to already be in effect before the client's own socket
-	// actually goes away.
+	// Recorded before Close(): the window has to already be in effect by the
+	// time a viewer that ignores the close code notices its socket is gone.
 	kickVncClient(name, c.remoteIP, c.userAgent)
-	_ = c.conn.Close()
+	_ = c.ws.Close(vncCloseKicked, "disconnected by an operator")
 	log.Printf("vnc: %s client #%d (%s) disconnected by operator, refusing reconnects from that ip+user-agent for %s", name, id, c.remoteIP, vncKickWindow)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -436,12 +440,12 @@ func handleVncSocket(w http.ResponseWriter, r *http.Request) {
 	// _wsProtocols defaults to []), so Accept must not negotiate one either.
 	sock := websocket.NetConn(ctx, c, websocket.MessageBinary)
 
-	// Registered after the upgrade (sock is what a disconnect handler
-	// actually closes) and deregistered on the way out regardless of why
+	// Registered after the upgrade (there is nothing to close before it)
+	// and deregistered on the way out regardless of why
 	// the bridge ended - a target restart or a network blip must clear this
 	// client from the panel exactly as promptly as an operator-initiated
 	// disconnect does.
-	vc := registerVncConn(name, remoteIP, r.UserAgent(), sock)
+	vc := registerVncConn(name, remoteIP, r.UserAgent(), c)
 	defer deregisterVncConn(name, vc.id)
 
 	log.Printf("vnc: %s -> %s connected (client #%d, %s)", name, t.Target, vc.id, remoteIP)

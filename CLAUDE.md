@@ -291,27 +291,22 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
     lockout, so the TCP case must *not* fall back to the header. See the
     admin-API auth paragraph further down.
 
-    Disconnecting isn't just `Close()` on the stored `net.Conn`: BackendRFB's
-    own `novncQuery` always sets `reconnect=1` (see `internal/vnc`), so the
-    still-open noVNC tab that just got kicked reconnects almost immediately
-    and the button would appear to do nothing. `handleDeleteVncClient`
-    therefore records a `vncKickWindow` (15s, package-level `vncKickUntil
-    map[vncKickKey]time.Time` behind `vncKickMu`, pruned lazily on every
-    check rather than on a timer) for that target+IP+User-Agent *before*
-    closing the conn, and `handleVncSocket` refuses a new connection
-    matching that same triple with a 403 until the window elapses — long
-    enough that noVNC's own reconnect backoff gives up mid-window, short
-    enough that a real network blip isn't mistaken for the kick for long.
-    User-Agent rides along with IP in `vncKickKey` because IP alone is
-    frequently shared by more than one browser (NAT, a shared office
-    egress) — keying on IP alone would kick everyone behind it, not just the
-    one client an operator picked. Two tabs of the *same* browser still get
-    kicked together (same IP, same User-Agent) — accepted rather than fixed,
-    since that's exactly the "two clients fighting over desktop size" case
-    the viewer's own "새 창으로 옮기기" handoff already treats as one unit.
-    This is explicitly a "turn the other viewer's screen off for a few
-    seconds", not a ban: the browser tab itself is never touched, and a
-    manual reload past the window reconnects normally. Frontend:
+    Disconnecting isn't a bare close: BackendRFB's own `novncQuery` always
+    sets `reconnect=1` (see `internal/vnc`), and noVNC retries for as long as
+    the page is open, so a viewer forgotten on another machine would be back
+    by itself. `handleDeleteVncClient` closes the WebSocket with
+    `vncCloseKicked` (4001), and router's noVNC (`config/novnc/kicked-viewer.sed`)
+    turns its auto-reconnect off on that code - the person at that viewer
+    gets noVNC's connect button and can reconnect by hand, so it is not a
+    ban. A viewer that doesn't know the code (a tab running a noVNC loaded
+    before that patch) is what `vncKickWindow` is for: 15s (package-level
+    `vncKickUntil map[vncKickKey]time.Time` behind `vncKickMu`, pruned lazily
+    on every check rather than on a timer) during which `handleVncSocket`
+    answers that target+IP+User-Agent with a 403. Such a viewer comes back
+    once the window is over. User-Agent rides along with IP in `vncKickKey`
+    because IP alone is frequently shared by more than one browser (NAT, a
+    shared office egress). Only the chosen connection is closed; another tab
+    of the same browser stays connected. Frontend:
     `frontend/src/components/Vnc/useVncClients.ts` (a new 5s poll, paused
     via `document.visibilityState` — this tab had no existing polling loop
     to join, unlike `useTailscaleEnabled.ts`'s) feeds a badge + expandable
