@@ -84,6 +84,8 @@ export function TargetDialog({
   const [resizeMode, setResizeMode] = useState<Exclude<VncResizeMode, ''>>(
     existing?.resizeMode || 'remote',
   )
+  // Follows the backend: the two want opposite ports (see portLooksWrong).
+  const exampleTarget = backend === 'rfb' ? 'roblox-studio-vnc:5900' : 'roblox-studio-vnc:6080'
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -123,40 +125,18 @@ export function TargetDialog({
             required
           />
           <p className="vnc-hint">
-            이 대상을 태울 App Route의 이름이자 뷰어가 열리는 경로입니다 — <code>/app/{name || '<이름>'}/</code>.
-            같은 이름의 App Route가 자동으로 만들어지고, 여기서 지우면 함께 사라집니다.
+            {backend === 'rfb' ? (
+              <>이 대상을 가리키는 이름입니다. 이 백엔드는 App Route를 만들지 않습니다.</>
+            ) : (
+              <>
+                이 대상을 태울 App Route의 이름이자 뷰어가 열리는 경로입니다 — <code>/app/{name || '<이름>'}/</code>.
+                같은 이름의 App Route가 자동으로 만들어지고, 여기서 지우면 함께 사라집니다.
+              </>
+            )}
           </p>
         </div>
-        <div className="form-field">
-          <label htmlFor="vnc-target">대상 (host:port)</label>
-          <input
-            id="vnc-target"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder="roblox-studio-vnc:6080"
-            required
-          />
-          {portLooksWrong(backend, target) === 'rfb' && (
-            <p className="vnc-hint vnc-hint-warn">
-              <code>{target}</code>의 포트는 raw RFB 포트로 보입니다. 지금 고른 백엔드는 대상이 직접
-              서비스하는 <strong>웹 VNC 포트</strong>(보통 <code>6080</code>)를 기대합니다 — raw RFB 포트에
-              바로 붙이려면 백엔드를 <strong>RFB</strong>로 바꾸세요.
-            </p>
-          )}
-          {portLooksWrong(backend, target) === 'web' && (
-            <p className="vnc-hint vnc-hint-warn">
-              <code>{target}</code>의 포트는 웹 VNC(noVNC/websockify) 포트로 보입니다. <strong>RFB</strong>{' '}
-              백엔드는 raw RFB 포트(보통 <code>5900</code>)를 기대합니다 — 대상의 웹 프런트엔드를 그대로
-              쓰려면 백엔드를 <strong>대상이 서비스하는 웹 VNC</strong>로 바꾸세요.
-            </p>
-          )}
-          {looksUnreachable(target) && (
-            <p className="vnc-hint vnc-hint-warn">
-              <code>{target || '(비어있음)'}</code>은(는) router 컨테이너 자신을 가리켜 대상 컨테이너에 닿지
-              않습니다 — <code>roblox-studio-vnc:6080</code>처럼 compose 서비스 호스트네임이나 네트워크 별칭을 쓰세요.
-            </p>
-          )}
-        </div>
+        {/* Above the address on purpose: which port is right depends on it
+            (see portLooksWrong), so it has to be chosen first. */}
         <div className="form-field">
           <label htmlFor="vnc-backend">뷰어 백엔드</label>
           <select id="vnc-backend" value={backend} onChange={(e) => setBackend(e.target.value)}>
@@ -167,6 +147,44 @@ export function TargetDialog({
             ))}
           </select>
           <p className="vnc-hint">{BACKEND_HINT[backend] ?? ''}</p>
+        </div>
+        <div className="form-field">
+          <label htmlFor="vnc-target">대상 (host:port)</label>
+          <input
+            id="vnc-target"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={exampleTarget}
+            required
+          />
+          {portLooksWrong(backend, target) === 'rfb' && (
+            <p className="vnc-hint vnc-hint-warn">
+              <code>{target}</code>의 포트는 raw RFB 포트로 보입니다. 지금 고른 백엔드는 대상이 직접
+              서비스하는 <strong>웹 VNC 포트</strong>(보통 <code>6080</code>)를 기대합니다 — raw RFB 포트에
+              바로 붙이려면 백엔드를 <strong>RFB</strong>로 바꾸세요.{' '}
+              <button type="button" className="btn btn-small" onClick={() => setBackend('rfb')}>
+                RFB로 바꾸기
+              </button>
+            </p>
+          )}
+          {portLooksWrong(backend, target) === 'web' && (
+            <p className="vnc-hint vnc-hint-warn">
+              <code>{target}</code>의 포트는 웹 VNC(noVNC/websockify) 포트로 보입니다. <strong>RFB</strong>{' '}
+              백엔드는 raw RFB 포트(보통 <code>5900</code>)를 기대합니다 — 대상의 웹 프런트엔드를 그대로
+              쓰려면 백엔드를 <strong>대상이 서비스하는 웹 VNC</strong>로 바꾸세요.{' '}
+              {backends.includes('novnc') && (
+                <button type="button" className="btn btn-small" onClick={() => setBackend('novnc')}>
+                  웹 VNC로 바꾸기
+                </button>
+              )}
+            </p>
+          )}
+          {looksUnreachable(target) && (
+            <p className="vnc-hint vnc-hint-warn">
+              <code>{target || '(비어있음)'}</code>은(는) router 컨테이너 자신을 가리켜 대상 컨테이너에 닿지
+              않습니다 — <code>{exampleTarget}</code>처럼 compose 서비스 호스트네임이나 네트워크 별칭을 쓰세요.
+            </p>
+          )}
         </div>
         <div className="form-field">
           <label htmlFor="vnc-resize">창 크기 변경 처리</label>
