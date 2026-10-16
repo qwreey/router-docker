@@ -12,7 +12,7 @@ import { useAuthStatus } from '../common/useAuthStatus'
 import { useVncClients } from './useVncClients'
 import { VncClientsBadge, VncClientsPanel } from './VncClientsPanel'
 import { HOME_TAB, VncTabs, tabLabel } from './VncTabs'
-import { notifyEmbedParent } from '../../embedTheme'
+import { notifyEmbedParent, useEmbedShown } from '../../embedTheme'
 import './Vnc.css'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -120,7 +120,13 @@ function PaneNotice({ children }: { children: ReactNode }) {
   )
 }
 
-export function Vnc() {
+// What router's noVNC listens for (the Dockerfile's third patch): whether
+// this page shows that viewer.
+const VIEWER_MESSAGE_SOURCE = 'code-docker-router-vnc'
+
+// shown: whether App shows this tab (it stays mounted, display:none, while
+// another one is up).
+export function Vnc({ shown }: { shown: boolean }) {
   const [targets, setTargets] = useState<VncTargetInfo[]>([])
   const [backends, setBackends] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -252,6 +258,27 @@ export function Vnc() {
     }
     win.location.replace(url)
   }
+
+  // Tell each viewer whether it can be seen, so a hidden one stops taking
+  // screen updates. An inactive tab is hidden with visibility:hidden, and so
+  // is this whole page inside a hidden code-server view - neither is
+  // anything the viewer can observe from inside its frame. Sent again on
+  // every load, since a reloaded viewer starts out assuming it is shown.
+  const embedShown = useEmbedShown()
+  useEffect(() => {
+    for (const [name, frame] of frames.current) {
+      let origin: string
+      try {
+        origin = new URL(frame.src).origin
+      } catch {
+        continue
+      }
+      frame.contentWindow?.postMessage(
+        { source: VIEWER_MESSAGE_SOURCE, type: 'viewer-shown', shown: shown && embedShown && tabs.active === name },
+        origin,
+      )
+    }
+  }, [shown, embedShown, tabs.active, tabs.open, frameLoads])
 
   // Keep the tab bar's fullscreen button honest regardless of who toggled
   // fullscreen - it can just as well be noVNC's control bar, or Esc. The

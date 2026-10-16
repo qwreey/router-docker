@@ -178,12 +178,18 @@ RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSIO
 # that resized first do it, until that one disconnects) gets one refusal per
 # change, not a loop - the refusal path never re-checks.
 #
-# Third patch (config/novnc/hidden-viewer.sed): no remote resize while the viewer can't be
-# seen. An editor tab in code-server holding a viewer, once another tab is active, hid
-# it with its frame shrunk to an iframe's default 300x150 - not 0x0, so the guard above
-# let it through - and the desktop stayed that small until someone looked again, which
-# left an agent capturing Studio a 300x150 screen. Reproduced with same-origin nested
-# frames hidden that way: 300x150 before, the previous size kept with this.
+# Third patch (config/novnc/hidden-viewer.sed): while the viewer can't be seen, no remote
+# resize and no screen updates. An editor tab in code-server holding a viewer, once
+# another tab is active, hid it with its frame shrunk to an iframe's default 300x150 -
+# not 0x0, so the guard above let it through - and the desktop stayed that small until
+# someone looked again, which left an agent capturing Studio a 300x150 screen.
+# Reproduced with same-origin nested frames hidden that way: 300x150 before, the
+# previous size kept with this. Updates: noVNC asks for the next one after every
+# update, seen or not, and viewers are kept connected while hidden (the VNC tab's
+# inactive tabs, code-server views kept alive) - so each one of a desktop with any
+# animation on it kept downloading it. The VNC tab tells each viewer whether it shows
+# it (frontend/src/components/Vnc/Vnc.tsx), since both of those hide with
+# visibility:hidden, which nothing inside the frame can observe.
 #
 # Fourth patch (config/novnc/kicked-viewer.sed, also app/ui.js): a viewer the VNC tab's
 # "끊기" disconnected stays disconnected. noVNC retries for as long as the page is open,
@@ -196,10 +202,11 @@ RUN sed -i '/_requestRemoteResize() {/,/^    }$/ s#^\( *\)const size = this\._sc
     && sed -i -f /tmp/novnc-hidden-viewer.sed /opt/novnc/core/rfb.js \
     && sed -i -f /tmp/novnc-kicked-viewer.sed /opt/novnc/core/rfb.js /opt/novnc/app/ui.js \
     && rm /tmp/novnc-hidden-viewer.sed /tmp/novnc-kicked-viewer.sed \
-    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 7 \
+    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 11 \
     && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/app/ui.js)" = 1 \
     && grep -q 'this._viewObserver.observe(document.documentElement)' /opt/novnc/core/rfb.js \
-    && grep -q 'this._viewObserver.disconnect()' /opt/novnc/core/rfb.js
+    && grep -q 'this._viewObserver.disconnect()' /opt/novnc/core/rfb.js \
+    && grep -q 'viewerShownListeners.add(this._eventHandlers.syncUpdates)' /opt/novnc/core/rfb.js
 
 COPY --from=router-manager-build /router-manager /usr/local/bin/router-manager
 COPY --from=router-frontend-build /src/dist /etc/router/router-manager/static

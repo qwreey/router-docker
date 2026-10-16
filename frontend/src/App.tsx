@@ -127,7 +127,7 @@ function App() {
         // display:contents so the section is laid out as a direct flex item
         // of the content area (see the --fill classes in App.css).
         <div className="vnc-host" style={{ display: tab === 'vnc' ? 'contents' : 'none' }}>
-          <Vnc />
+          <Vnc shown={tab === 'vnc'} />
         </div>
       )}
       {tab === 'tailscale' && <Tailscale />}

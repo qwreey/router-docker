@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react'
+
 // Theme control for when this SPA is embedded in a cross-origin iframe
 // (webmanager's Dev Proxy/App Routes/Tailscale tabs, once ROUTER_MANAGER_HOSTS
 // is configured - see RouterFrame.tsx on the webmanager side). A cross-origin
@@ -95,4 +97,40 @@ export function notifyEmbedParent(type: string, payload: Record<string, unknown>
   const origin = parentOrigin()
   if (!origin) return
   window.parent.postMessage({ source: MESSAGE_SOURCE, type, ...payload }, origin)
+}
+
+// Whether the embedding parent shows this page right now: webmanager hides
+// its VNC tab with display:none while another tab is up, and inside
+// code-server a whole view is kept alive while hidden. The VNC tab passes it
+// on to its viewers, which stop taking screen updates while hidden (the
+// Dockerfile's third noVNC patch). True outside an iframe and until the
+// parent says otherwise, so a parent that never sends it changes nothing.
+let embedShown = true
+const embedShownListeners = new Set<() => void>()
+
+function onEmbedShownMessage(event: MessageEvent) {
+  if (window.parent === window || event.source !== window.parent) return
+  const origin = parentOrigin()
+  if (origin && event.origin !== origin) return
+  const data = event.data
+  if (!data || typeof data !== 'object' || data.source !== MESSAGE_SOURCE || data.type !== 'shown') return
+  if (typeof data.shown !== 'boolean' || data.shown === embedShown) return
+  embedShown = data.shown
+  embedShownListeners.forEach((l) => l())
+}
+
+// Listened to from the start rather than on subscribe: the parent sends it
+// on the frame's load event, which can come before React has mounted
+// anything to subscribe.
+window.addEventListener('message', onEmbedShownMessage)
+
+function subscribeEmbedShown(listener: () => void) {
+  embedShownListeners.add(listener)
+  return () => {
+    embedShownListeners.delete(listener)
+  }
+}
+
+export function useEmbedShown(): boolean {
+  return useSyncExternalStore(subscribeEmbedShown, () => embedShown)
 }
