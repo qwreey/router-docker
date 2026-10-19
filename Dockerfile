@@ -195,15 +195,24 @@ RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSIO
 # "끊기" disconnected stays disconnected. noVNC retries for as long as the page is open,
 # so a viewer forgotten on another machine came back by itself and resized the desktop
 # again; the close code router-manager ends it with now turns its auto-reconnect off.
+#
+# Fifth patch (config/novnc/clipboard-sync.sed, app/ui.js): the desktop's clipboard and
+# the browser's are shared, so copying out of a viewer or pasting into one no longer
+# needs noVNC's clipboard panel. A copy on the desktop lands in the browser's clipboard;
+# Ctrl+V on the viewer hands the browser's clipboard to the desktop before the V.
 COPY config/novnc/hidden-viewer.sed /tmp/novnc-hidden-viewer.sed
 COPY config/novnc/kicked-viewer.sed /tmp/novnc-kicked-viewer.sed
+COPY config/novnc/clipboard-sync.sed /tmp/novnc-clipboard-sync.sed
 RUN sed -i '/_requestRemoteResize() {/,/^    }$/ s#^\( *\)const size = this\._screenSize();#\1const size = this._screenSize();\n\1// PATCHED (router-docker): never request a 0x0 desktop - see Dockerfile.\n\1if (size.w < 1 || size.h < 1) { return; }#' /opt/novnc/core/rfb.js \
     && sed -i 's#^\( *\)if (this\._FBU\.x === 1 \&\& this\._FBU\.y === 0) {$#\1// PATCHED (router-docker): also re-check after a server-side resize - see Dockerfile.\n\1if ((this._FBU.x === 1 \&\& this._FBU.y === 0) || this._FBU.x === 0) {#' /opt/novnc/core/rfb.js \
     && sed -i -f /tmp/novnc-hidden-viewer.sed /opt/novnc/core/rfb.js \
     && sed -i -f /tmp/novnc-kicked-viewer.sed /opt/novnc/core/rfb.js /opt/novnc/app/ui.js \
-    && rm /tmp/novnc-hidden-viewer.sed /tmp/novnc-kicked-viewer.sed \
+    && sed -i -f /tmp/novnc-clipboard-sync.sed /opt/novnc/app/ui.js \
+    && rm /tmp/novnc-hidden-viewer.sed /tmp/novnc-kicked-viewer.sed /tmp/novnc-clipboard-sync.sed \
     && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/core/rfb.js)" = 11 \
-    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/app/ui.js)" = 1 \
+    && test "$(grep -c 'PATCHED (router-docker)' /opt/novnc/app/ui.js)" = 4 \
+    && grep -q "document.addEventListener('keydown', UI.clipboardPasteKey, true)" /opt/novnc/app/ui.js \
+    && grep -q '^    clipboardPasteKey(e) {$' /opt/novnc/app/ui.js \
     && grep -q 'this._viewObserver.observe(document.documentElement)' /opt/novnc/core/rfb.js \
     && grep -q 'this._viewObserver.disconnect()' /opt/novnc/core/rfb.js \
     && grep -q 'viewerShownListeners.add(this._eventHandlers.syncUpdates)' /opt/novnc/core/rfb.js
