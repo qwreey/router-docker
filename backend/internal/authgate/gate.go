@@ -24,7 +24,7 @@ var (
 	ErrEnvPinned         = errors.New("authgate: password is pinned by ROUTER_MANAGER_AUTH_PASSWORD_HASH, not changeable via API")
 	ErrWrongPassword     = errors.New("authgate: incorrect current password")
 	ErrBadSetupToken     = errors.New("authgate: missing or incorrect setup token")
-	// ErrRateLimited is returned by TryUnlock once a key has failed
+	// ErrRateLimited is returned by TryUnlock/ChangePassword once a key has failed
 	// maxFailuresBeforeLockout times in a row - handlers surface this as
 	// 429 rather than the ambiguous "incorrect password" 401 a real guess
 	// gets.
@@ -196,10 +196,14 @@ func (g *Gate) recordFailure(key string) {
 	}
 	st.failures++
 	if st.failures >= maxFailuresBeforeLockout {
-		backoff := lockoutBase * time.Duration(1<<uint(st.failures-maxFailuresBeforeLockout))
-		if backoff > lockoutMax {
-			backoff = lockoutMax
+		// Doubled step by step rather than as lockoutBase << n: the shift
+		// overflows int64 a few dozen failures in, and a negative backoff
+		// is no lockout at all.
+		backoff := lockoutBase
+		for i := maxFailuresBeforeLockout; i < st.failures && backoff < lockoutMax; i++ {
+			backoff *= 2
 		}
+		backoff = min(backoff, lockoutMax)
 		st.lockedUntil = time.Now().Add(backoff)
 	}
 }
@@ -283,8 +287,10 @@ func (g *Gate) SetupPassword(token, plaintext string) error {
 // Refuses if envHash pins the effective hash (an API-driven change would be
 // silently shadowed by the env var on every request anyway, so refuse
 // rather than pretend it worked) or if nothing is configured yet (use
-// SetupPassword instead).
-func (g *Gate) ChangePassword(currentPlaintext, newPlaintext string) error {
+// SetupPassword instead). The current-password check shares key's lockout
+// with TryUnlock - it is the same guess, and without that this endpoint is
+// an unthrottled oracle for the password /unlock throttles.
+func (g *Gate) ChangePassword(key, currentPlaintext, newPlaintext string) error {
 	if g.envHash != "" {
 		return ErrEnvPinned
 	}
@@ -292,13 +298,18 @@ func (g *Gate) ChangePassword(currentPlaintext, newPlaintext string) error {
 	if current == "" {
 		return ErrNotConfigured
 	}
+	if remaining, locked := g.rateLimited(key); locked {
+		return fmt.Errorf("%w: try again in %s", ErrRateLimited, remaining.Round(time.Second))
+	}
 	match, err := VerifyPassword(currentPlaintext, current)
 	if err != nil {
 		return err
 	}
 	if !match {
+		g.recordFailure(key)
 		return ErrWrongPassword
 	}
+	g.recordSuccess(key)
 	hash, err := HashPassword(newPlaintext)
 	if err != nil {
 		return err

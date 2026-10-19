@@ -195,3 +195,49 @@ func TestSetupTokenRotatesAfterUse(t *testing.T) {
 		t.Fatalf("SetupPassword(new token): %v", err)
 	}
 }
+
+// TestLockoutSurvivesLongCampaign is the regression test for the 2026-10-18
+// review: the backoff was lockoutBase * (1 << n), which overflowed int64 from
+// the 36th consecutive failure - negative or zero backoffs, i.e. no lockout,
+// for good from the 60th on.
+func TestLockoutSurvivesLongCampaign(t *testing.T) {
+	g := New("", "")
+	for i := 1; i <= 200; i++ {
+		g.recordFailure("10.0.0.1")
+		if i < maxFailuresBeforeLockout {
+			continue
+		}
+		remaining, locked := g.rateLimited("10.0.0.1")
+		if !locked || remaining > lockoutMax {
+			t.Fatalf("after %d failures: locked=%v remaining=%s, want locked for at most %s", i, locked, remaining, lockoutMax)
+		}
+	}
+}
+
+// TestChangePasswordSharesLockout is the regression test for the 2026-10-18
+// review's B1: /api/auth/change checked the current password with no
+// lockout, an unthrottled oracle beside /unlock's throttled one.
+func TestChangePasswordSharesLockout(t *testing.T) {
+	g := New("", filepath.Join(t.TempDir(), "auth-hash.json"))
+	hash, err := HashPassword("hunter2")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if err := writeStoredHash(g.storePath, hash); err != nil {
+		t.Fatalf("writeStoredHash: %v", err)
+	}
+	for i := 0; i < maxFailuresBeforeLockout; i++ {
+		if err := g.ChangePassword("10.0.0.1", "wrong", "new"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("ChangePassword(wrong) #%d = %v, want ErrWrongPassword", i, err)
+		}
+	}
+	if err := g.ChangePassword("10.0.0.1", "hunter2", "new"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("ChangePassword after %d failures = %v, want ErrRateLimited", maxFailuresBeforeLockout, err)
+	}
+	if _, _, err := g.TryUnlock("10.0.0.1", "hunter2"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("TryUnlock after failed changes = %v, want ErrRateLimited - one bucket for both", err)
+	}
+	if err := g.ChangePassword("10.0.0.2", "hunter2", "new"); err != nil {
+		t.Fatalf("ChangePassword(other key, correct) = %v, want nil", err)
+	}
+}

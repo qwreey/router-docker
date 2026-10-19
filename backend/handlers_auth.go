@@ -272,8 +272,10 @@ func handleAuthChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := gate.ChangePassword(body.CurrentPassword, body.NewPassword); err != nil {
+	if err := gate.ChangePassword(rateLimitKey(r), body.CurrentPassword, body.NewPassword); err != nil {
 		switch {
+		case errors.Is(err, authgate.ErrRateLimited):
+			writeError(w, http.StatusTooManyRequests, err.Error())
 		case errors.Is(err, authgate.ErrEnvPinned):
 			writeError(w, http.StatusConflict, "password is set via ROUTER_MANAGER_AUTH_PASSWORD_HASH and can't be changed here")
 		case errors.Is(err, authgate.ErrNotConfigured):
