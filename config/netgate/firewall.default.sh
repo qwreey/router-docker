@@ -241,7 +241,12 @@ apply_rules() {
 			# unrelated host:80 on the internet would also match
 			# --dport 80 and get DNATed back to target_host by mistake.
 			add_nat -A NETGATE-PREROUTING -i "$default_iface" -p tcp --dport "$host_port" -j DNAT --to-destination "$target_ip:$target_port"
-			add_filter -A NETGATE-FORWARD -d "$target_ip" -p tcp --dport "$target_port" -j ACCEPT
+			# The ACCEPT matches only connections that DNAT above just
+			# rewrote. Keyed on the target alone, it would also let every
+			# network router is a gateway for (dind's containers, an
+			# isolated sibling's network) reach target_ip:target_port
+			# directly, past the RFC1918 blocks below.
+			add_filter -A NETGATE-FORWARD -i "$default_iface" -d "$target_ip" -p tcp --dport "$target_port" -m conntrack --ctstate DNAT -j ACCEPT
 		fi
 		i=$((i + 1))
 	done
