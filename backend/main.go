@@ -113,7 +113,7 @@ func main() {
 	if novncDir == "" {
 		novncDir = "/opt/novnc"
 	}
-	mux := newMux(staticDir, novncDir)
+	handler := newHandler(staticDir, novncDir)
 
 	go normalizeCaddyFragments()
 
@@ -122,9 +122,24 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("router-manager listening on %s (auth gate configured: %v, source: %s)", listener.Addr(), gate.Configured(), gate.Source())
-	if err := http.Serve(listener, mux); err != nil {
+	if err := http.Serve(listener, handler); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// newHandler is newMux behind CrossOriginProtection. The unlock cookie is
+// SameSite=Strict, which keeps it off cross-site requests but not off
+// same-site ones - and a sibling subdomain (a Dev Proxy or vhost app, on the
+// same registrable domain as ROUTER_MANAGER_HOSTS) is same-site, so without
+// this its page could POST a CORS-simple text/plain body to
+// /api/tinyauth/users or /api/netgate/forwards with the operator's cookie
+// attached. It refuses non-GET/HEAD/OPTIONS requests a browser marks as
+// anything but same-origin (Sec-Fetch-Site, else Origin vs Host); requests
+// with neither header - curl over the socket, the CLI - pass untouched.
+// Every cross-origin caller that exists (webmanager's and code-server's
+// banners) only GETs auth/status and tailscale/state.
+func newHandler(staticDir, novncDir string) http.Handler {
+	return http.NewCrossOriginProtection().Handler(newMux(staticDir, novncDir))
 }
 
 // newMux registers every route. Reads are gated like writes: the lists these
