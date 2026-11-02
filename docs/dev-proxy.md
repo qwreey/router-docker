@@ -125,6 +125,12 @@ server {
 않습니다 — expose의 host 필드나 라우트 path/target 설정은 지금까지와
 완전히 동일하게 적으면 됩니다.
 
+정규화한 경로가 `/exports/` 밖으로 나가는 요청(`/..%2frouter/` 등)은 router의
+nginx가 400으로 거부합니다. 바깥 프록시의 rewrite는 클라이언트가 보낸 경로를
+그대로 이어 붙이기 때문에, 이 검사가 없으면 Dev Proxy 호스트로 `/router/`나
+code-server에 닿을 수 있습니다. 이유는 `config/nginx/nginx.default.conf`의
+`$router_prefix_escaped` 참고.
+
 `/exports/`에는 code-server/webmanager용 `ALLOWED_HOSTS`가 적용되지 않습니다 — Dev
 Proxy는 여기 등록한 호스트에만 응답하고 나머지는 404이므로, 등록 목록 자체가 허용
 목록입니다(호스트를 바꿀 때마다 `.env` 수정과 재시작이 필요하지 않게).
