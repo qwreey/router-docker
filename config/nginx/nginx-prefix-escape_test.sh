@@ -44,6 +44,15 @@ done <<'EOF'
 /app/x%2f..%2f../router/ /router/
 EOF
 
+# Raw control characters nginx lets through in a URI, written with $'...' since
+# they can't be typed into the heredoc above. Each is popped by the ../ after it.
+for ctl in $'\t' $'\v' $'\f'; do
+    for sample in "/exports/$ctl/..%2frouter/ /router/" "/app/code/$ctl/../../router/ /router/" \
+        "/app/$ctl/../../router/ /router/"; do
+        escaped "$sample" || { echo "should be refused but passes: $(printf '%q' "$sample")"; failed=1; }
+    done
+done
+
 while IFS= read -r sample; do
     escaped "$sample" && { echo "should pass but is refused: $sample"; failed=1; }
 done <<'EOF'
