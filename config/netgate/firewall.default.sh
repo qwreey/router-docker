@@ -72,6 +72,17 @@ valid_cidr() {
 	esac
 }
 
+NETGATE_DEFAULT_CONFIG=/etc/router/netgate/config.default.yaml
+
+# A mapping whose outbound:/forwards:, when present, are lists. An absent key
+# still counts as usable (a deliberate hand-written config may omit one);
+# yq exits nonzero on empty input, on invalid YAML, and on a false result.
+config_is_usable() {
+	printf '%s' "$1" | yq -e 'type == "object"
+		and ((.outbound // []) | type == "array")
+		and ((.forwards // []) | type == "array")' >/dev/null 2>&1
+}
+
 valid_port() {
 	case "$1" in
 	'' | *[!0-9]*) return 1 ;;
@@ -195,6 +206,24 @@ apply_rules() {
 	# file in full, and every field below comes from the same version.
 	config_snapshot="$(cat "$NETGATE_CONFIG" 2>/dev/null)"
 
+	# RFC1918 is blocked by config.yaml's outbound: list, not by the fixed set
+	# below, so a file that is missing, empty or not valid YAML must not read
+	# as "zero outbound rules" - that would apply a chain with the private
+	# ranges open. Keep the last good cycle's chain instead; with none applied
+	# yet (first cycle after the container started), use the shipped default.
+	if ! config_is_usable "$config_snapshot"; then
+		if iptables -S NETGATE-FORWARD >/dev/null 2>&1; then
+			echo >&2 "netgate-firewall: $NETGATE_CONFIG is missing or not a valid netgate config - keeping the previous cycle's rules until it is fixed"
+			return 1
+		fi
+		echo >&2 "netgate-firewall: $NETGATE_CONFIG is missing or not a valid netgate config and no rules are applied yet - applying the shipped default until it is fixed"
+		config_snapshot="$(cat "$NETGATE_DEFAULT_CONFIG" 2>/dev/null)"
+		if ! config_is_usable "$config_snapshot"; then
+			echo >&2 "netgate-firewall: $NETGATE_DEFAULT_CONFIG is unusable too - applying nothing this cycle"
+			return 1
+		fi
+	fi
+
 	filter_rules=""
 	nat_rules=""
 
@@ -220,9 +249,8 @@ apply_rules() {
 	# outbound: block rules below, since target_host's own address is
 	# typically itself in RFC1918 range (see config.default.yaml's comment).
 	fwd_count=$(printf '%s' "$config_snapshot" | yq -r '.forwards | length' 2>/dev/null)
-	# Both a yq failure (nonzero exit, e.g. malformed YAML) and yq succeeding
-	# with empty output (e.g. the config file doesn't exist yet) must fall
-	# back to 0 - an empty $fwd_count would make the loop test error out.
+	# config_is_usable already passed, so this is only a guard: an empty
+	# $fwd_count would make the loop test error out.
 	fwd_count="${fwd_count:-0}"
 	i=0
 	while [ "$i" -lt "$fwd_count" ]; do
