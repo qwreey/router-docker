@@ -382,6 +382,26 @@ fi
 vhost_resolver="$(awk '/^nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null \
     | awk '{ if (index($0, ":")) printf "[%s] ", $0; else printf "%s ", $0 }' | xargs || true)"
 
+# ROUTER_CLIENT_IP_TOKEN (shared .env value, empty by default) - a secret the
+# default upstream (code-docker) checks before believing X-Real-IP, sent on
+# `location /` and on vhosts pointing at the same host as DEFAULT_UPSTREAM
+# (the WebDAV listener's code-docker:82), never to any other upstream. Why a
+# token: router also passes raw TCP to code-docker (a tailscale publish),
+# where the client writes every header itself, so the peer address alone
+# can't tell router's nginx from a client. 32+ letters/digits, since the
+# consumer pastes it into a regex.
+NGINX_CLIENT_IP_TOKEN=""
+if [ -n "${ROUTER_CLIENT_IP_TOKEN:-}" ]; then
+    if [[ "$ROUTER_CLIENT_IP_TOKEN" =~ ^[A-Za-z0-9]{32,}$ ]]; then
+        NGINX_CLIENT_IP_TOKEN="$ROUTER_CLIENT_IP_TOKEN"
+    else
+        echo "nginx-service: ROUTER_CLIENT_IP_TOKEN must be 32+ letters/digits - not sending it" >&2
+    fi
+fi
+export NGINX_CLIENT_IP_TOKEN
+client_ip_token_host="${DEFAULT_UPSTREAM:-code-docker:80}"
+client_ip_token_host="${client_ip_token_host%%:*}"
+
 vhost_blocks=""
 for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
     # ROUTER_VHOST_PWA_* / ROUTER_VHOST_PWA_ICON_* share this prefix but are
@@ -524,6 +544,9 @@ $vhost_pwa_icon_block"
         fi
     fi
 
+    vhost_token=""
+    [ "${vhost_upstream%%:*}" = "$client_ip_token_host" ] && vhost_token="$NGINX_CLIENT_IP_TOKEN"
+
     echo "nginx-service: vhost${vhost_server_names} -> $vhost_upstream (from $vhost_var)" >&2
     vhost_blocks="$vhost_blocks
     server {
@@ -558,6 +581,9 @@ $vhost_pwa_block
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$router_forwarded_proto;
+            # Empty (not sent) except on DEFAULT_UPSTREAM's host, see
+            # NGINX_CLIENT_IP_TOKEN.
+            proxy_set_header X-Router-Token \"$vhost_token\";
             # A vhost target is a whole separate origin, so it never has a
             # legitimate reason to see router-manager's admin unlock cookie,
             # nor tinyauth's parent-domain session (no tinyauth check runs
@@ -569,6 +595,6 @@ done
 export NGINX_VHOST_SERVER_BLOCKS="$vhost_blocks"
 
 generated_config=/run/nginx.generated.conf
-envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK} ${NGINX_VHOST_SERVER_BLOCKS}' < "$nginx_config" > "$generated_config"
+envsubst '${NGINX_ACCESS_LOG_IF} ${NGINX_ALLOWED_HOSTS_MAP} ${NGINX_ALLOWED_EXPORT_HOSTS_MAP} ${NGINX_LOOPBACK_BLOCK_MAP} ${NGINX_TRUSTED_PROXIES_DIRECTIVES} ${NGINX_CLIENT_IP_TOKEN} ${NGINX_DENY_INTERNAL_EXPORTS_DIRECTIVE} ${NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE} ${NGINX_ROUTER_MANAGER_SERVER_BLOCK} ${NGINX_TINYAUTH_SERVER_BLOCK} ${NGINX_VHOST_SERVER_BLOCKS}' < "$nginx_config" > "$generated_config"
 
 exec nginx -g "daemon off;" -c "$generated_config"

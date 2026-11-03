@@ -157,6 +157,11 @@ ${CADDY_ADAPTER_TCP_BLOCK}
 		# Same tinyauth cookie strip as every managed fragment
 		# (devproxy.StripTinyauthCookies) - the default upstream needs none of it.
 		header_up Cookie "tinyauth-[^=;]*=[^;]*(; )?" ""
+		# Caddy drops X-Forwarded-Proto on a unix-socket listener (see
+		# backend/internal/devproxy/forwardauth.go); nginx's location / set
+		# it, and the upstream needs it to mark its cookies Secure.
+		# X-Real-IP and X-Router-Token pass through untouched.
+		header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
 	}
 }
 

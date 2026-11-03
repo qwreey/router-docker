@@ -60,6 +60,10 @@ services:
       NGINX_BLOCK_LOOPBACK: "${NGINX_BLOCK_LOOPBACK:-true}"
       TRUSTED_PROXIES: "${TRUSTED_PROXIES:-}"
       NGINX_LOG_LEVEL: "${NGINX_LOG_LEVEL:-errors}"
+      # Shared with DEFAULT_UPSTREAM the same way (code-docker's example-env
+      # documents it): the secret that lets the upstream believe the
+      # X-Real-IP router sends - see nginx-service.default.sh.
+      ROUTER_CLIENT_IP_TOKEN: "${ROUTER_CLIENT_IP_TOKEN:-}"
       # Optional manual override - left unset by default so router
       # auto-detects code-docker-internal's live CIDR from its own routing
       # table instead (see nginx-service.default.sh's detect_internal_subnet).
