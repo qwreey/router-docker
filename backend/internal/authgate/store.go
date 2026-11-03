@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"router/internal/atomicfile"
 )
 
 // storedHash is the on-disk shape written by writeStoredHash - just the
@@ -44,9 +45,5 @@ func writeStoredHash(path, hash string) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data, 0o600, 0o700)
 }

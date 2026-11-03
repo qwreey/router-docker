@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"sync"
@@ -206,10 +205,7 @@ func EnsureSeeded() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(LiveConfigPath), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(LiveConfigPath, data, 0o644)
+	return atomicfile.Write(LiveConfigPath, data, 0o644, 0o755)
 }
 
 func ListOutbound(path string) ([]OutboundRule, error) {

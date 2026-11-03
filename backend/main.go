@@ -16,6 +16,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/qwreey/envmigrate"
@@ -122,7 +124,16 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("router-manager listening on %s (auth gate configured: %v, source: %s)", listener.Addr(), gate.Configured(), gate.Source())
-	if err := http.Serve(listener, handler); err != nil {
+	// Header-only timeout: the VNC bridge is a long-lived WebSocket, so no
+	// Read/WriteTimeout. nginx already limits slow clients on the outside;
+	// this covers ROUTER_MANAGER_ADDR's direct TCP listener too.
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		IdleTimeout:       2 * time.Minute,
+	}
+	if err := server.Serve(listener); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -139,7 +150,48 @@ func main() {
 // Every cross-origin caller that exists (webmanager's and code-server's
 // banners) only GETs auth/status and tailscale/state.
 func newHandler(staticDir, novncDir string) http.Handler {
-	return http.NewCrossOriginProtection().Handler(newMux(staticDir, novncDir))
+	return http.NewCrossOriginProtection().Handler(hardenResponses(newMux(staticDir, novncDir)))
+}
+
+// hardenResponses sets the headers every response should carry and caps API
+// request bodies (limitBody). Handlers may still override a header.
+//   - nosniff: a JSON error that echoes input must never be read as HTML.
+//   - Referrer-Policy same-origin: the SPA's URLs (?target=, VNC names)
+//     don't leave for an App Route or Dev Proxy page it links to.
+//   - no-store on /api/: the lists describe the operator's network and users
+//     and must not sit in a shared or browser cache.
+//
+// No frame header: webmanager embeds this SPA, cross-origin when
+// ROUTER_MANAGER_HOSTS is set.
+func hardenResponses(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, limitBody(r.URL.Path))
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// limitBody is the request body cap for an API path. The handlers decode
+// JSON straight off r.Body, several of them before any password check
+// (unlock, setup), so without a cap any caller could make one buffer as much
+// as it sends. DNS takes blocklist sources and host lists, which can run to
+// megabytes; nginx caps /router/ at the same 64 MiB.
+func limitBody(path string) int64 {
+	switch {
+	case strings.HasPrefix(path, "/api/auth/"):
+		return 64 << 10
+	case strings.HasPrefix(path, "/api/dns/"):
+		return 64 << 20
+	default:
+		return 1 << 20
+	}
 }
 
 // newMux registers every route. Reads are gated like writes: the lists these
@@ -360,13 +412,45 @@ func listen() (net.Listener, error) {
 	return l, nil
 }
 
+// tailscaleStateCache backs the ungated GET /api/tailscale/state, which
+// forks `tailscale status` - every open code-server and webmanager tab polls
+// it, and anyone who can reach /router/ can call it. One run serves every
+// caller within tailscaleStateTTL, and callers arriving mid-run wait for it
+// instead of starting their own.
+var tailscaleStateCache struct {
+	sync.Mutex
+	at    time.Time
+	state tailscale.State
+	err   error
+}
+
+const tailscaleStateTTL = 2 * time.Second
+
 func handleTailscaleState(w http.ResponseWriter, r *http.Request) {
-	state, err := tailscale.GetState(r.Context())
+	c := &tailscaleStateCache
+	c.Lock()
+	if time.Since(c.at) >= tailscaleStateTTL {
+		// Not the request's context: a caller hanging up must not cancel
+		// the run the others are waiting on. GetState bounds itself.
+		c.state, c.err = tailscale.GetState(context.Background())
+		c.at = time.Now()
+	}
+	state, err := c.state, c.err
+	c.Unlock()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		log.Printf("tailscale state: %v", err)
+		http.Error(w, "tailscale state unavailable - see router's container log", http.StatusServiceUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
+}
+
+// internalError answers 500 without the error text, which can carry paths
+// and internals, and logs it instead. For handlers reachable without a
+// password; gated ones may still echo their errors to the operator.
+func internalError(w http.ResponseWriter, what string, err error) {
+	log.Printf("%s: %v", what, err)
+	writeError(w, http.StatusInternalServerError, what+" failed - see router's container log")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -98,3 +98,32 @@ func TestCrossOriginWritesRefused(t *testing.T) {
 		t.Errorf("cross-site GET /api/auth/status = %d, want 200 - webmanager and code-server poll it", rec.Code)
 	}
 }
+
+// hardenResponses: every response carries nosniff, API responses aren't
+// cacheable, and an oversized body on an ungated auth route is refused
+// rather than decoded.
+func TestResponsesHardened(t *testing.T) {
+	old, oldLog := gate, containerLogPath
+	gate = authgate.New("", "")
+	containerLogPath = os.DevNull
+	t.Cleanup(func() { gate, containerLogPath = old, oldLog })
+	h := newHandler(t.TempDir(), t.TempDir())
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("API Cache-Control = %q, want no-store", got)
+	}
+
+	big := `{"password":"` + strings.Repeat("a", 128<<10) + `"}`
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/unlock", strings.NewReader(big))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST /api/auth/unlock with a 128 KiB body = %d, want 400", rec.Code)
+	}
+}

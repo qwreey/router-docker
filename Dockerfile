@@ -51,7 +51,7 @@ COPY backend/handlers_envversion.go ./
 COPY backend/handlers_vhostpwa.go ./
 COPY backend/static.go ./
 COPY backend/internal ./internal
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /router-manager .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /router-manager .
 
 # router/frontend's own SPA build (AppRoutes/DevProxy/Tailscale/설정 tabs,
 # see router/frontend/src/App.tsx) - served directly by router-manager
@@ -158,12 +158,21 @@ COPY --chown=root:root config/tailscale/tailscale-service.default.sh \
 #
 # Tagged release tarball rather than a package: noVNC is in neither Arch's
 # official repos nor a reasonable AUR pin. Pinned via ARG so a bump is one
-# line and shows up in the build args.
+# line and shows up in the build args, and checked by sha256 because this
+# code runs on the admin SPA's own origin - a tag can be moved, the hash
+# can't. To bump: change both, taking the hash from
+# `curl -fsSL <url> | sha256sum`.
+#
+# Only what the viewer loads is kept (vnc.html, app/, core/, vendor/, po/):
+# router-manager serves this whole tree ungated, and the test pages, docs,
+# proxy scripts and packaging have no business on that origin.
 ARG NOVNC_VERSION=1.6.0
+ARG NOVNC_SHA256=5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa
 RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" -o /tmp/novnc.tar.gz \
+    && echo "${NOVNC_SHA256}  /tmp/novnc.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/novnc \
     && tar xzf /tmp/novnc.tar.gz -C /opt/novnc --strip-components=1 \
-    && rm /tmp/novnc.tar.gz
+    && rm -rf /tmp/novnc.tar.gz /opt/novnc/tests /opt/novnc/docs /opt/novnc/utils /opt/novnc/snap /opt/novnc/.github
 
 # noVNC hardening: never ask the server for a 0x0 desktop. With remote
 # resizing on (noVNC's `resize=remote`, the VNC tab's default) noVNC

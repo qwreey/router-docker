@@ -93,7 +93,7 @@ func handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "password check", err)
 		return
 	}
 	if !ok {
@@ -252,7 +252,7 @@ func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "missing or incorrect setup token - it is printed in router's container log (docker compose logs code-docker-router | grep setup-token)")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "password setup", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -283,7 +283,7 @@ func handleAuthChange(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, authgate.ErrWrongPassword):
 			writeError(w, http.StatusUnauthorized, "incorrect current password")
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			internalError(w, "password change", err)
 		}
 		return
 	}

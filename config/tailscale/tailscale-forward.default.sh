@@ -79,6 +79,13 @@ default_intervall=$(yq -r '.retry_intervall // 5' "$CONFIG")
 
 # forwards: pull a remote peer's port in via socat + tailscaled's SOCKS5 proxy.
 count=$(yq -r '.forwards | length' "$CONFIG")
+# An empty bind= would leave socat listening on every interface - every
+# network router is a gateway on, not just code-docker-internal. Exit so
+# supervisord retries once the alias resolves.
+if [ "$count" -gt 0 ] && [ -z "$FORWARD_IP" ]; then
+    echo "tailscale-forward: the 'forward' alias doesn't resolve - not opening forwards on every interface" >&2
+    exit 1
+fi
 i=0
 while [ "$i" -lt "$count" ]; do
     local_port=$(yq -r ".forwards[$i].local_port" "$CONFIG")

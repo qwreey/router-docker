@@ -16,7 +16,7 @@ import (
 func handleEnvVersion(w http.ResponseWriter, r *http.Request) {
 	dismiss, err := envversionprefs.Load(envVersionDismissPath)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "env version banner state", err)
 		return
 	}
 
@@ -42,7 +42,7 @@ func handleDismissEnvVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := envversionprefs.Save(envVersionDismissPath, envversionprefs.Dismiss{DismissedVersion: envTemplateVersion}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "env version banner state", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

@@ -46,7 +46,9 @@ fi
 # router's own persistent volume instead of the image's ephemeral layer,
 # same reasoning as tailscale's state under
 # /var/lib/code-docker-router/tailscale/state.
+# 700: tinyauth keeps its session store here.
 mkdir -p /var/lib/code-docker-router/tinyauth
+chmod 700 /var/lib/code-docker-router/tinyauth
 [ -e /data ] || ln -s /var/lib/code-docker-router/tinyauth /data
 
 # router-manager's own per-user credential CRUD (see

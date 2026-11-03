@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"router/internal/atomicfile"
 	"sort"
 	"strings"
 
@@ -238,10 +239,7 @@ func writeAndValidate(ctx context.Context, name, content string) error {
 	if data, err := os.ReadFile(p); err == nil {
 		previous, hadPrevious = string(data), true
 	}
-	if err := os.MkdirAll(ManagedDir, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	if err := atomicfile.Write(p, []byte(content), 0o644, 0o755); err != nil {
 		return err
 	}
 	if err := runCaddy(ctx, "adapt", "--config", devproxy.CaddyfilePath, "--adapter", "caddyfile"); err != nil {

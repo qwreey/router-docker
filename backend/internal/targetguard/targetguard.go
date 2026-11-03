@@ -16,6 +16,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -43,14 +44,14 @@ func IsSelfHost(host string) bool {
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
-// deniedTargets are host:port pairs no feature may target even though the
-// host itself is allowed: dind's Docker API is unauthenticated and
-// privileged, so a route, forward or tailnet publish pointing at it hands
-// out root on the host. dind's other ports (containers it publishes) stay
-// fine targets.
-var deniedTargets = map[string]map[string]bool{
-	"dind": {"2375": true, "2376": true},
-}
+// deniedPorts are ports no feature may target on any host, even an allowed
+// one: 2375/2376 are dind's Docker API, unauthenticated and privileged, so a
+// route, forward or tailnet publish pointing at it hands out root on the
+// host. Keyed on the port alone rather than "dind:2375" so another name for
+// the same container (its container name, its IP with the allowlist opt-out)
+// is refused too. dind's other ports (containers it publishes) stay fine
+// targets.
+var deniedPorts = map[int]bool{2375: true, 2376: true}
 
 // DefaultAllowedHosts is the allowlist every feature starts from: the
 // code-docker-internal services a user legitimately points things at,
@@ -118,8 +119,17 @@ func ValidateHost(host, port string, allowedHosts map[string]bool, allowExternal
 	if IsSelfHost(host) {
 		return fmt.Errorf("target %q would point back at router itself - not a valid %s target", host, featureLabel)
 	}
-	if deniedTargets[host][port] {
-		return fmt.Errorf("target %s:%s is dind's unauthenticated Docker API - never a valid %s target", host, port, featureLabel)
+	if port != "" {
+		// Compared as a number, and only in its canonical spelling: the
+		// consumers (Caddy, Go's dialer) read "02375" as 2375, so a text
+		// comparison against the deny list would let it through.
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return fmt.Errorf("target port %q must be a plain number from 1 to 65535", port)
+		}
+		if deniedPorts[n] {
+			return fmt.Errorf("target %s:%s is dind's unauthenticated Docker API port - never a valid %s target", host, port, featureLabel)
+		}
 	}
 
 	if allowExternalEnv != "" && os.Getenv(allowExternalEnv) == "true" {

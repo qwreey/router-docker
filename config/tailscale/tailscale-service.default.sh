@@ -15,7 +15,9 @@ fi
 # it. State lives under router's own persistent volume now (moved here from
 # code-docker's /code - see .claude/functional-router-plan.md's
 # "tailscale 전체 이관").
+# 700: the node's private key lives here.
 mkdir -p /var/lib/code-docker-router/tailscale/state
+chmod 700 /var/lib/code-docker-router/tailscale/state
 
 # Same path tailscale-forward.default.sh/tailscale-publish.default.sh own -
 # read only, deliberately NOT seeded here too: this program can start before

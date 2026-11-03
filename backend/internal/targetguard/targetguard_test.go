@@ -39,3 +39,21 @@ func TestValidateHostRefusesDockerAPI(t *testing.T) {
 		t.Errorf("ValidateHost(elsewhere) with no opt-out = nil, want refusal")
 	}
 }
+
+// The deny list is compared on the port's value: a spelling the consumers
+// read as 2375 must not slip past a text comparison, and the Docker API
+// ports are refused under any host name.
+func TestValidateRefusesNonCanonicalPorts(t *testing.T) {
+	allowed := map[string]bool{"code-docker": true, "dind": true}
+	t.Setenv("TEST_ALLOW_EXTERNAL", "true")
+	for _, target := range []string{"dind:02375", "dind:002376", "dind:0", "dind:65536", "dind:+2375", "code-docker-dind:2375", "172.19.0.3:2376"} {
+		if err := Validate(target, allowed, "TEST_ALLOW_EXTERNAL", "test"); err == nil {
+			t.Errorf("Validate(%s) = nil, want refusal", target)
+		}
+	}
+	for _, target := range []string{"dind:8080", "code-docker:80", "dind"} {
+		if err := Validate(target, allowed, "", "test"); err != nil {
+			t.Errorf("Validate(%s) = %v, want ok", target, err)
+		}
+	}
+}

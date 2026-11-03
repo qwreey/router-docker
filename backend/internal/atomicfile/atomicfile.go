@@ -1,12 +1,9 @@
 // Package atomicfile provides a crash-safe file write (temp file in the
-// same directory + rename) for the config files router-manager's various
-// packages read-modify-write. internal/authgate and internal/tinyauthusers
-// already did this by hand for their own credential files; this pulls the
-// same pattern out for internal/netgate, internal/tailscale, and
-// internal/dns, which previously wrote via a plain os.WriteFile - a crash
-// mid-write there could leave a truncated config for the ~30s-polling
-// netgate-firewall.default.sh (or the next dns/tailscale program restart)
-// to read and fail to parse.
+// same directory, fsync, rename, fsync the directory) for every file
+// router-manager read-modify-writes: credentials (authgate,
+// tinyauthusers), Caddy fragments, and the configs that polling scripts
+// read (netgate, tailscale, dns). A torn write there would be a truncated
+// config read back, or a credential file lost on power failure.
 package atomicfile
 
 import (
@@ -26,16 +23,37 @@ func Write(path string, data []byte, perm, dirPerm os.FileMode) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
 		return err
 	}
-	// os.WriteFile only applies perm when it CREATES the file - if a
-	// previous crash left a stale .tmp file with different permissions
-	// behind, WriteFile's O_TRUNC reuses that file as-is and perm is
-	// silently ignored. Explicit Chmod guarantees the file this renames
-	// over path always ends up with exactly perm.
-	if err := os.Chmod(tmp, perm); err != nil {
+	// OpenFile only applies perm when it CREATES the file - a stale .tmp a
+	// previous crash left behind keeps its old mode. Chmod makes the file
+	// renamed over path always end up with exactly perm (0600 for a
+	// credential).
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
 		return err
 	}
-	return os.Rename(tmp, path)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	// Data before rename, rename before the directory entry: otherwise a
+	// power loss can leave path pointing at an empty file.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }

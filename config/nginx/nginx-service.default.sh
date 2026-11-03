@@ -240,6 +240,9 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
         # (a desktop with nothing moving on it sends nothing), and nginx's
         # 60s default would cut it.
         proxy_read_timeout 3600s;
+        # Same cap as the shared hostname's /router/ (nginx.default.conf says
+        # why), so an upload behaves the same on both.
+        client_max_body_size 64m;
 
         # router/frontend's own api/client.ts hardcodes every API call under
         # /router/api/... regardless of which origin the SPA is actually

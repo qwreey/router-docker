@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"router/internal/atomicfile"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -104,11 +105,7 @@ func save(path string, users []User) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data, 0o600, 0o700)
 }
 
 // ListUsers returns every user's name only - callers must never leak
@@ -223,12 +220,5 @@ func RenderEnvFile(envPath string, users []User) error {
 	// neither the name charset (validateName) nor a bcrypt hash's alphabet
 	// can currently produce one.
 	line := "TINYAUTH_AUTH_USERS=" + shellQuote(strings.Join(pairs, ",")) + "\n"
-	if err := os.MkdirAll(filepath.Dir(envPath), 0o700); err != nil {
-		return err
-	}
-	tmp := envPath + ".tmp"
-	if err := os.WriteFile(tmp, []byte(line), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, envPath)
+	return atomicfile.Write(envPath, []byte(line), 0o600, 0o700)
 }
