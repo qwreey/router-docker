@@ -102,6 +102,28 @@ RUN pacman -Suy --noconfirm --needed \
         iptables iproute2 supervisor yq gettext curl \
         tailscale socat caddy dnsmasq nginx bind && \
     pacman -Scc --noconfirm
+# Baked-in default blocklist (StevenBlack/hosts - a standard, generic list
+# is sufficient per the plan doc, no prompt-injection-specific list needed).
+# dnsmasq's addn-hosts= reads hosts-format files directly (see
+# config/dns/dnsmasq.default.conf), and a config/dns/blocklist.override.hosts
+# is added on top of it at runtime (see dns.default.sh).
+# - Pinned to a commit and checked against its sha256: the file is fetched
+#   from a third party at build time, and this layer sits right after
+#   pacman so editing a script doesn't refetch it. To bump, take a new
+#   commit of StevenBlack/hosts and the sha256 of its `hosts` file.
+# - Only `0.0.0.0 <name>` lines (and comments) are kept. dnsmasq answers
+#   whatever address a line names, so an entry mapping a real domain to
+#   some other address would redirect it rather than block it; the
+#   upstream's own localhost/broadcast header lines go too.
+ARG STEVENBLACK_HOSTS_COMMIT=6d56ab44f2b3d27de062b5194eb51bcd8115a773
+ARG STEVENBLACK_HOSTS_SHA256=0d81148f9990ecbde614ba1a135f81113fbb5f9972e783af22ff1c6dadb57508
+RUN mkdir -p /etc/router/dns && \
+    curl -fsSL -o /tmp/stevenblack.hosts \
+        "https://raw.githubusercontent.com/StevenBlack/hosts/${STEVENBLACK_HOSTS_COMMIT}/hosts" && \
+    echo "${STEVENBLACK_HOSTS_SHA256}  /tmp/stevenblack.hosts" | sha256sum -c - && \
+    awk '$1 == "0.0.0.0" || /^[[:space:]]*(#|$)/' /tmp/stevenblack.hosts \
+        > /etc/router/dns/blocklist.default.hosts && \
+    rm /tmp/stevenblack.hosts
 RUN mkdir -p /var/log/netgate-firewall /var/log/netgate-shaping \
         /var/log/tailscaled /var/log/tailscale-forward /var/log/tailscale-publish \
         /var/log/router-manager /var/log/caddy-adapter /var/log/dns /var/log/nginx \
@@ -224,13 +246,4 @@ COPY --from=tinyauth-bin /tinyauth/tinyauth /usr/local/bin/tinyauth
 # read this (ROUTER_ENV_TEMPLATE_PATH, default matches this path) - see
 # example-env.router's own doc comment and docs/router.md.
 COPY --chown=root:root example-env.router /etc/router/example-env.router
-# Baked-in default blocklist (StevenBlack/hosts - a standard, generic list
-# is sufficient per the plan doc, no prompt-injection-specific list
-# needed), saved as-is: dnsmasq's addn-hosts= reads hosts-format files
-# directly (see config/dns/dnsmasq.default.conf), so unlike the old squid
-# era there's no dstdomain-list conversion step anymore. A
-# config/dns/blocklist.override.hosts is checked for at runtime instead,
-# added on top of this one (not swapped in for it) - see dns.default.sh.
-RUN curl -fsSL -o /etc/router/dns/blocklist.default.hosts \
-        https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
 ENTRYPOINT ["/etc/router/netgate-entrypoint.sh"]
