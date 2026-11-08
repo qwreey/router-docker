@@ -10,6 +10,7 @@ import { TinyauthUsers } from './components/Tinyauth/TinyauthUsers'
 import { RouterUnlockModalHost } from './components/common/UnlockModal'
 import { OriginWarningBanner } from './components/common/OriginWarningBanner'
 import { EnvVersionBanner } from './components/common/EnvVersionBanner'
+import { WeakPasswordBanner } from './components/common/WeakPasswordBanner'
 import { SidebarContainer } from './components/Layout/SidebarContainer'
 import { listenForEmbedThemeMessages, notifyEmbedReady } from './embedTheme'
 import { withViewTransition } from './utils/viewTransition'
@@ -121,6 +122,7 @@ function App() {
     <>
       <OriginWarningBanner />
       <EnvVersionBanner />
+      <WeakPasswordBanner onOpenSettings={embed || tab === 'settings' ? undefined : () => setTab('settings')} />
       {tab === 'dev-proxy' && <DevProxy />}
       {tab === 'app-routes' && <AppRoutes />}
       {vncVisited && (

@@ -89,11 +89,12 @@ export function createApiClient(prefix: string, opts: { skipUnlockRetry?: boolea
   async function request<T>(path: string, init?: RequestInit, retried = false, prompt = true): Promise<T> {
     const res = await fetch(apiUrl(path), init)
 
-    // Only ever true for the auth client's own POST /unlock (it's the only
-    // createApiClient instance with skipUnlockRetry set) - notifies every
-    // mounted useAuthStatus() consumer to self-refresh once the gate state
-    // actually changed.
-    if (opts.skipUnlockRetry && path === '/unlock' && res.ok) {
+    // Only ever true for the auth client's own POST /unlock, /setup or
+    // /change (it's the only createApiClient instance with skipUnlockRetry
+    // set) - notifies every mounted useAuthStatus() consumer to self-refresh
+    // once the gate state actually changed (a change also clears the
+    // weak-password flag).
+    if (opts.skipUnlockRetry && (path === '/unlock' || path === '/setup' || path === '/change') && res.ok) {
       notifyAuthStatusChange()
     }
 

@@ -102,7 +102,9 @@ func handleAuthUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	gate.SetCookie(w, token)
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	// The caller just proved the password, so telling them it is short is no
+	// leak; the unauthenticated paths above never reach this.
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true, "weakPassword": gate.WeakPassword()})
 }
 
 type authStatusResponse struct {
@@ -123,6 +125,12 @@ type authStatusResponse struct {
 	// this API - the frontend just displays it so a user can tell at a
 	// glance whether a dedicated domain is configured. Empty when unset.
 	TrustedHosts []string `json:"trustedHosts"`
+	// WeakPassword is set only on a response to a request that is itself
+	// unlocked: for anyone else it would tell them the password is shorter
+	// than authgate.MinPasswordLength. Stays false (and is omitted) until an
+	// unlock in this process has verified the password - see
+	// authgate.Gate.WeakPassword.
+	WeakPassword bool `json:"weakPassword,omitempty"`
 	// RequestHost is the Host header this specific request arrived on -
 	// lets the frontend compare "am I currently on one of TrustedHosts" and
 	// warn if not (see the localhost/shared-origin banner).
@@ -222,6 +230,7 @@ func handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Unlocked = true
 		formatted := until.UTC().Format(time.RFC3339)
 		resp.UnlockedUntil = &formatted
+		resp.WeakPassword = gate.WeakPassword()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -246,6 +255,10 @@ func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	if err := gate.SetupPassword(body.Token, body.Password); err != nil {
 		if errors.Is(err, authgate.ErrAlreadyConfigured) {
 			writeError(w, http.StatusConflict, "password already configured - use /api/auth/change instead")
+			return
+		}
+		if errors.Is(err, authgate.ErrPasswordTooShort) {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if errors.Is(err, authgate.ErrBadSetupToken) {
@@ -282,6 +295,8 @@ func handleAuthChange(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "no password configured yet - use /api/auth/setup instead")
 		case errors.Is(err, authgate.ErrWrongPassword):
 			writeError(w, http.StatusUnauthorized, "incorrect current password")
+		case errors.Is(err, authgate.ErrPasswordTooShort):
+			writeError(w, http.StatusBadRequest, err.Error())
 		default:
 			internalError(w, "password change", err)
 		}

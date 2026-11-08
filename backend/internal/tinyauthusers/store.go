@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"router/internal/atomicfile"
+	"router/internal/authgate"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -123,6 +124,9 @@ func AddUser(path, name, plaintext string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
+	if err := authgate.CheckNewPassword(plaintext); err != nil {
+		return err
+	}
 	users, err := load(path)
 	if err != nil {
 		return err
@@ -151,6 +155,9 @@ func AddUser(path, name, plaintext string) error {
 func SetPassword(path, name, plaintext string) error {
 	if plaintext == "" {
 		return errors.New("password is required")
+	}
+	if err := authgate.CheckNewPassword(plaintext); err != nil {
+		return err
 	}
 	users, err := load(path)
 	if err != nil {

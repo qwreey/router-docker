@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { authApi, errorMessage } from '../../api/client'
 import { ErrorBanner } from './ErrorBanner'
+import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, isPasswordLongEnough } from './passwordPolicy'
 
 interface AuthStatus {
   required: boolean
@@ -42,6 +43,10 @@ export function RouterAuthPanel() {
 
   async function handleSetup(e: FormEvent) {
     e.preventDefault()
+    if (!isPasswordLongEnough(password)) {
+      setFormError(PASSWORD_TOO_SHORT_MESSAGE)
+      return
+    }
     setSubmitting(true)
     setFormError(null)
     try {
@@ -59,6 +64,10 @@ export function RouterAuthPanel() {
 
   async function handleChange(e: FormEvent) {
     e.preventDefault()
+    if (!isPasswordLongEnough(newPassword)) {
+      setFormError(PASSWORD_TOO_SHORT_MESSAGE)
+      return
+    }
     setSubmitting(true)
     setFormError(null)
     try {
@@ -130,6 +139,7 @@ export function RouterAuthPanel() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                <p className="form-hint">{MIN_PASSWORD_LENGTH}자 이상 (글자 종류 제한은 없습니다)</p>
               </div>
             </div>
             <button type="submit" className="btn btn-primary" disabled={submitting || !password || !setupToken.trim()}>
@@ -166,6 +176,7 @@ export function RouterAuthPanel() {
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
                 />
+                <p className="form-hint">{MIN_PASSWORD_LENGTH}자 이상 (글자 종류 제한은 없습니다)</p>
               </div>
             </div>
             <button type="submit" className="btn btn-primary" disabled={submitting || !currentPassword || !newPassword}>

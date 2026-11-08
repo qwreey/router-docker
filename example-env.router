@@ -139,7 +139,8 @@ ROUTER_ENV_VERSION=11
 #.
 #.   docker compose exec code-docker-router router-manager --hash-password
 #.
-#. 비밀번호를 두 번 입력받아 오타를 확인한 뒤, $argon2id$... 로 시작하는
+#. 비밀번호를 두 번 입력받아 오타를 확인한 뒤(12자 이상이어야 합니다),
+#. $argon2id$... 로 시작하는
 #. 해시 한 줄만 출력합니다 - 반드시 작은따옴표로 감싸서 붙여넣으세요
 #. (docker compose가 env_file도 $변수 형태로 해석해서, 따옴표 없이 붙이면
 #. 해시가 깨집니다).

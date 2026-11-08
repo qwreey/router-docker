@@ -59,6 +59,11 @@ func hashPasswordCmd() int {
 		return 1
 	}
 
+	if err := authgate.CheckNewPassword(password); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
 	hash, err := authgate.HashPassword(password)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error hashing password: %v\n", err)

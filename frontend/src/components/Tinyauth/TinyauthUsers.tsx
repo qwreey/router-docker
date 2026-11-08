@@ -4,6 +4,7 @@ import { ErrorBanner } from '../common/ErrorBanner'
 import { Skeleton } from '../common/Skeleton'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { withViewTransition } from '../../utils/viewTransition'
+import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, isPasswordLongEnough } from '../common/passwordPolicy'
 
 interface TinyauthUser {
   name: string
@@ -70,6 +71,10 @@ export function TinyauthUsers() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!isPasswordLongEnough(password)) {
+      setFormError(PASSWORD_TOO_SHORT_MESSAGE)
+      return
+    }
     setSubmitting(true)
     setFormError(null)
     try {
@@ -95,6 +100,10 @@ export function TinyauthUsers() {
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
     if (!changingPasswordFor) return
+    if (!isPasswordLongEnough(newPassword)) {
+      setChangeError(PASSWORD_TOO_SHORT_MESSAGE)
+      return
+    }
     setChanging(true)
     setChangeError(null)
     try {
@@ -212,6 +221,7 @@ export function TinyauthUsers() {
                 autoFocus
                 required
               />
+              <p className="form-hint">{MIN_PASSWORD_LENGTH}자 이상 (글자 종류 제한은 없습니다)</p>
             </div>
           </div>
           {changeError && <ErrorBanner message={changeError} onDismiss={() => setChangeError(null)} />}
@@ -240,6 +250,7 @@ export function TinyauthUsers() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              <p className="form-hint">{MIN_PASSWORD_LENGTH}자 이상 (글자 종류 제한은 없습니다)</p>
             </div>
           </div>
           {formError && <ErrorBanner message={formError} onDismiss={() => setFormError(null)} />}

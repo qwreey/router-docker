@@ -156,7 +156,7 @@ func TestSetupPasswordRequiresToken(t *testing.T) {
 	}
 
 	// Copy-paste from a terminal: whitespace and case are forgiven.
-	if err := g.SetupPassword("  "+strings.ToUpper(token)+"\n", "hunter2"); err != nil {
+	if err := g.SetupPassword("  "+strings.ToUpper(token)+"\n", "hunter2-hunter2"); err != nil {
 		t.Fatalf("SetupPassword(correct token) = %v", err)
 	}
 	if !g.Configured() {
@@ -180,7 +180,7 @@ func TestSetupTokenRotatesAfterUse(t *testing.T) {
 	announce := func(tok string) { announced = append(announced, tok) }
 
 	g.AnnounceSetupToken(announce)
-	if err := g.SetupPassword(announced[0], "hunter2"); err != nil {
+	if err := g.SetupPassword(announced[0], "hunter2-hunter2"); err != nil {
 		t.Fatalf("SetupPassword: %v", err)
 	}
 	if err := os.Remove(store); err != nil {
@@ -193,7 +193,7 @@ func TestSetupTokenRotatesAfterUse(t *testing.T) {
 	if len(announced) != 2 || announced[1] == announced[0] {
 		t.Fatalf("announced = %v, want a second, different token", announced)
 	}
-	if err := g.SetupPassword(announced[1], "hunter2"); err != nil {
+	if err := g.SetupPassword(announced[1], "hunter2-hunter2"); err != nil {
 		t.Fatalf("SetupPassword(new token): %v", err)
 	}
 }
@@ -239,7 +239,7 @@ func TestChangePasswordSharesLockout(t *testing.T) {
 	if _, _, err := g.TryUnlock("10.0.0.1", "hunter2"); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("TryUnlock after failed changes = %v, want ErrRateLimited - one bucket for both", err)
 	}
-	if err := g.ChangePassword("10.0.0.2", "hunter2", "new"); err != nil {
+	if err := g.ChangePassword("10.0.0.2", "hunter2", "hunter2-hunter2"); err != nil {
 		t.Fatalf("ChangePassword(other key, correct) = %v, want nil", err)
 	}
 }

@@ -263,6 +263,10 @@ export interface AuthStatus {
   source: 'env' | 'file' | 'unset'
   unlocked: boolean
   unlockedUntil?: string | null // RFC3339, only set when unlocked
+  // True only on a response to an unlocked request, and only once an unlock
+  // in this backend process has shown the password to be below the minimum
+  // length - see components/common/WeakPasswordBanner.tsx.
+  weakPassword?: boolean
   trustedHosts: string[]
   requestHost: string
   // ROUTER_APP_ORIGIN - the origin that actually serves /app/ (the shared

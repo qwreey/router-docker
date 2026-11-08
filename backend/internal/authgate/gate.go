@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Errors returned by SetupPassword/ChangePassword (see store.go) - handlers
@@ -29,7 +30,29 @@ var (
 	// 429 rather than the ambiguous "incorrect password" 401 a real guess
 	// gets.
 	ErrRateLimited = errors.New("authgate: too many failed attempts")
+	// ErrPasswordTooShort is returned by CheckNewPassword, and so by every
+	// place a password is chosen - handlers surface it as 400.
+	ErrPasswordTooShort = fmt.Errorf("password must be at least %d characters", MinPasswordLength)
 )
+
+// MinPasswordLength is the shortest password any place in router accepts when
+// one is *chosen*, counted in Unicode code points. Length is the only rule:
+// composition rules (digits, symbols, mixed case) push people toward
+// predictable substitutions without making a password harder to guess
+// (NIST SP 800-63B). tinyauthusers imports this, so the number is defined
+// once.
+const MinPasswordLength = 12
+
+// CheckNewPassword reports whether p may be chosen as a password. It cannot
+// run on an existing hash - only the plaintext is checkable - which is why
+// the gate also tracks, per successful unlock, whether the password in use
+// is below the minimum (see Gate.WeakPassword).
+func CheckNewPassword(p string) error {
+	if utf8.RuneCountInString(p) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	return nil
+}
 
 const (
 	maxFailuresBeforeLockout = 5
@@ -113,6 +136,16 @@ type Gate struct {
 	setupMu        sync.Mutex
 	setupToken     string
 	tokenAnnounced bool
+
+	// weakFor is the hash that a successful unlock proved to be below
+	// MinPasswordLength ("" when none is known to be). Keyed by hash rather
+	// than a bare bool so that a hash replaced behind the gate's back (the
+	// password file deleted and set up again) stops being reported as weak
+	// without any bookkeeping. Memory only: after a restart every session
+	// cookie is void too (the HMAC secret is per process), so the next
+	// unlock re-learns it before anyone could be shown the flag.
+	weakMu  sync.Mutex
+	weakFor string
 }
 
 // New creates a Gate. envHash empty means no infra-as-code pin; storePath
@@ -311,6 +344,9 @@ func (g *Gate) SetupPassword(token, plaintext string) error {
 	if subtle.ConstantTimeCompare([]byte(normalizeSetupToken(token)), []byte(g.setupToken)) != 1 {
 		return ErrBadSetupToken
 	}
+	if err := CheckNewPassword(plaintext); err != nil {
+		return err
+	}
 	hash, err := HashPassword(plaintext)
 	if err != nil {
 		return err
@@ -318,6 +354,7 @@ func (g *Gate) SetupPassword(token, plaintext string) error {
 	if err := writeStoredHash(g.storePath, hash); err != nil {
 		return err
 	}
+	g.setWeak("")
 	g.setupToken = newSetupToken()
 	g.tokenAnnounced = false
 	return nil
@@ -351,11 +388,44 @@ func (g *Gate) ChangePassword(key, currentPlaintext, newPlaintext string) error 
 		return ErrWrongPassword
 	}
 	g.recordSuccess(key)
+	// After the current-password check, so a wrong current password is still
+	// reported as that, and a too-short new one is not counted as a failed
+	// guess (recordSuccess above already cleared the key's failures).
+	if err := CheckNewPassword(newPlaintext); err != nil {
+		return err
+	}
 	hash, err := HashPassword(newPlaintext)
 	if err != nil {
 		return err
 	}
-	return writeStoredHash(g.storePath, hash)
+	if err := writeStoredHash(g.storePath, hash); err != nil {
+		return err
+	}
+	g.setWeak("")
+	return nil
+}
+
+func (g *Gate) setWeak(hash string) {
+	g.weakMu.Lock()
+	g.weakFor = hash
+	g.weakMu.Unlock()
+}
+
+// WeakPassword reports whether the password in effect is known to be below
+// MinPasswordLength. "Known" means a successful unlock in this process
+// verified it; until then the answer is false, because a stored hash can't
+// be length-checked.
+//
+// Callers must only expose this to a request that has itself unlocked (see
+// handleAuthStatus): to anyone else it would say the password is short.
+func (g *Gate) WeakPassword() bool {
+	if g == nil {
+		return false
+	}
+	g.weakMu.Lock()
+	weakFor := g.weakFor
+	g.weakMu.Unlock()
+	return weakFor != "" && weakFor == g.currentHash()
 }
 
 // issueToken mints a fresh token for a just-typed password. See mintToken
@@ -494,6 +564,11 @@ func (g *Gate) TryUnlock(key, plaintext string) (token string, ok bool, err erro
 		return "", false, nil
 	}
 	g.recordSuccess(key)
+	if CheckNewPassword(plaintext) != nil {
+		g.setWeak(hash)
+	} else {
+		g.setWeak("")
+	}
 	return g.issueToken(), true, nil
 }
 

