@@ -40,6 +40,12 @@ router가 게이트웨이나 VNC 중계 역할로 붙어 있는 다른 망 — `
 붙이면 됩니다. 끄는 방법과 포트 목록은 `example-env.router`의
 `ROUTER_FRONTDOOR_EXTERNAL_ONLY`/`ROUTER_FRONTDOOR_PORTS` 참고.
 
+router 안에서만 쓰는 포트(tinyauth의 3000)는 loopback에서만 받습니다. tinyauth 자체도
+`127.0.0.1`에만 바인드하고(기동 전에 `tinyauth config`로 확인) 그 위에 iptables가
+한 겹 더 막습니다 — `example-env.router`의 `ROUTER_LOOPBACK_PORTS` 참고.
+tinyauth가 기본으로 켜 두는 버전 정보 수집(analytics)도 끕니다. 두 값 모두 `.env.router`로
+되돌릴 수 없습니다.
+
 tailscale/Dev Proxy/App Routes/VNC/DNS/Net 관리/tinyauth/설정(router-manager 자체
 비밀번호 설정)은 전부 webmanager의 해당 탭에서도 관리할 수 있고, `http://<host>/router/`를
 직접 열면 webmanager 없이도 같은 화면을 쓸 수 있습니다 — 자세한 내용은 아래

@@ -58,6 +58,36 @@ guard_front_door() {
 	echo "netgate-entrypoint: front door (tcp $ports) accepts only $ext_if (outward-facing) and lo"
 }
 
+# Ports only router's own processes should reach (tinyauth on 3000 - nginx,
+# Caddy and App Routes call it on 127.0.0.1): accepted on lo, reset on every
+# other interface. The service binding loopback is the first layer; this one
+# holds even if a later tinyauth or a config change binds it wider. Separate
+# from the front door's opt-out on purpose - nothing outside router has a
+# reason to reach these. Empty ROUTER_LOOPBACK_PORTS turns it off.
+guard_loopback_only() {
+	ports="${ROUTER_LOOPBACK_PORTS-3000}"
+	[ -n "$ports" ] || return 0
+	for ipt in iptables ip6tables; do
+		if ! command -v "$ipt" >/dev/null 2>&1; then
+			[ "$ipt" = ip6tables ] && { echo "netgate-entrypoint: ip6tables not found - loopback-only ports guarded on IPv4 only" >&2; continue; }
+			echo "netgate-entrypoint: $ipt not found" >&2
+			return 1
+		fi
+		"$ipt" -N ROUTER-LOOPBACK 2>/dev/null || "$ipt" -F ROUTER-LOOPBACK || return 1
+		"$ipt" -C INPUT -j ROUTER-LOOPBACK 2>/dev/null || "$ipt" -I INPUT 1 -j ROUTER-LOOPBACK || return 1
+		for port in $(printf '%s' "$ports" | tr ',' ' '); do
+			"$ipt" -A ROUTER-LOOPBACK -p tcp --dport "$port" -i lo -j RETURN || return 1
+			"$ipt" -A ROUTER-LOOPBACK -p tcp --dport "$port" -j REJECT --reject-with tcp-reset || return 1
+		done
+	done
+	echo "netgate-entrypoint: tcp $ports accepts only lo"
+}
+
+if ! guard_loopback_only; then
+	echo "netgate-entrypoint: could not guard the loopback-only ports - exiting (see above)" >&2
+	exit 1
+fi
+
 if [ "${ROUTER_FRONTDOOR_EXTERNAL_ONLY:-true}" = "false" ]; then
 	echo "netgate-entrypoint: ROUTER_FRONTDOOR_EXTERNAL_ONLY=false - front door reachable from every attached network, including code-docker-internal and every sibling's isolated network" >&2
 elif ! guard_front_door; then

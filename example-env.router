@@ -209,6 +209,11 @@ ROUTER_ENV_VERSION=11
 #ROUTER_FRONTDOOR_EXTERNAL_ONLY="true"
 #. 위 제한을 거는 포트 목록(콤마 구분, 컨테이너 안쪽 포트).
 #ROUTER_FRONTDOOR_PORTS="80"
+#. router 자신의 프로세스만 쓰는 포트 목록(콤마 구분). loopback에서만 받고 다른
+#. 모든 망에서는 거부합니다 - 기본값 3000은 tinyauth로, nginx/Caddy/App Routes가
+#. 127.0.0.1로만 부릅니다. 위 앞문 설정과 무관하게 항상 적용되며, 빈 값("")이면
+#. 끕니다.
+#ROUTER_LOOPBACK_PORTS="3000"
 
 #. --- router 자신의 nginx: /exports/ 관련 ---
 #. Dev Proxy가 쓰는 /exports/ 전용 허용 Host 헤더 목록(콤마 구분, 스킴/포트

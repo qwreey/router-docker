@@ -575,6 +575,14 @@ nginx `listen <ip>` because a single wildcard `listen 80` added to any server bl
 would silently reopen the IP-based version. Failing to apply it exits the container rather
 than serving an open front door. The per-location deny below predates it and stays as a
 second layer.
+**tinyauth (tcp 3000) is loopback-only, twice over**: `tinyauth.default.sh` exports
+`TINYAUTH_SERVER_ADDRESS=127.0.0.1` (and `TINYAUTH_ANALYTICS_ENABLED=false`) after
+`.env.router` is loaded and checks `tinyauth config` before starting - exported, not passed
+as flags, because any flag makes tinyauth v5 ignore every `TINYAUTH_*` variable. And
+`netgate-entrypoint.sh`'s `guard_loopback_only` (`ROUTER_LOOPBACK_PORTS`, independent of the
+front-door opt-out) resets 3000 on every interface but `lo`. tinyauth's own default is
+`0.0.0.0`; everything that calls it (nginx, Caddy's `forward_auth`, App Routes) uses
+`127.0.0.1:3000`.
 **Every location that proxies to that socket denies `code-docker-internal` source
 addresses** (`ROUTER_NGINX_DENY_INTERNAL_MANAGER`, default on, 2026-09-07 security
 review finding C2) — the shared hostname's `/router/` in `nginx.default.conf` *and*

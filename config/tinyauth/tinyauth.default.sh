@@ -80,4 +80,30 @@ if [ -z "${TINYAUTH_AUTH_USERS:-}" ] \
     exec sleep infinity
 fi
 
+# Two settings forced here, after .env.router has been loaded, so it can't undo
+# them; `tinyauth config` then shows the configuration tinyauth will really
+# run with, checked before starting it. Exported rather than passed as flags:
+# tinyauth v5 ignores every TINYAUTH_* variable as soon as any flag is given,
+# APPURL and AUTH_USERS included.
+# - server.address 127.0.0.1: nginx, Caddy's forward_auth and App Routes all
+#   reach tinyauth at 127.0.0.1:3000, and tinyauth's own default is 0.0.0.0,
+#   which would put its login and forward-auth endpoints on every network
+#   router is a gateway for (code-docker-internal, every sibling's isolated
+#   network) without nginx in front. netgate-entrypoint.sh's
+#   ROUTER_LOOPBACK_PORTS guard is the second layer.
+# - analytics.enabled false: on by default upstream, it periodically reports
+#   version information to tinyauth's servers from router, which has egress.
+export TINYAUTH_SERVER_ADDRESS=127.0.0.1
+export TINYAUTH_ANALYTICS_ENABLED=false
+effective=$(/usr/local/bin/tinyauth config 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+setting() {
+    printf '%s\n' "$effective" | awk -v sec="$1:" -v key="$2:" '$0 == sec { s = 1; next } /^[^ ]/ { s = 0 } s && $1 == key { print $2; exit }'
+}
+address=$(setting server address)
+# A false boolean is left out of the dump, so "" means off too.
+analytics=$(setting analytics enabled)
+if [ "$address" != 127.0.0.1 ] || [ "${analytics:-false}" != false ]; then
+    echo >&2 "tinyauth: would run with server.address '$address' and analytics.enabled '$analytics', want 127.0.0.1 and false - not starting"
+    exit 1
+fi
 exec /usr/local/bin/tinyauth
