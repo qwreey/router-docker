@@ -82,6 +82,11 @@ services:
         limits:
           cpus: "${ROUTER_CPU_LIMIT:-0}"
           memory: "${ROUTER_MEM_LIMIT:-0}"
+          # Unlike the two above, limited by default: router's own programs are a
+          # fixed set, so a fork bomb or runaway spawner is the only way to reach
+          # it. Threads count, not only processes - the Go programs (tailscaled,
+          # Caddy, tinyauth, router-manager) each run dozens. "0" is unlimited.
+          pids: ${ROUTER_PIDS_LIMIT:-1024}
     # Memory+swap combined; "0" leaves Docker's default (swap as large as the
     # memory limit). See code-docker's example-env.
     memswap_limit: "${ROUTER_MEMSWAP_LIMIT:-0}"
@@ -106,13 +111,23 @@ services:
     # BUILD_CONTEXT - see root CLAUDE.md's "Build (Dockerfile)" section), not against
     # this fragment's own location. Confirmed via `docker compose config` that declaring
     # it here instead resolves to router/data/router, which is wrong.
+    # Capabilities are an allow-list: every default one dropped, then only what
+    # router's own programs were measured to need added back, so a capability a
+    # later Docker release adds to its default set doesn't silently reach the
+    # container every other network's traffic passes through. No privileged:
+    # true - this container is meaningfully more trusted than code-docker (the
+    # same "국경을 넘는 컨테이너" framing as dind), and a compromised nginx/
+    # tinyauth/Caddy should get as little of that as possible.
+    cap_drop:
+      - ALL
     cap_add:
-      # NET_ADMIN only - no privileged: true, no SYS_MODULE or anything
-      # else. This container is meaningfully more trusted than code-docker
-      # (same "국경을 넘는 컨테이너" framing as dind), so it gets exactly the
-      # one capability its job (iptables/ip_forward/routing, all scoped to
-      # its own netns) actually needs and nothing more.
+      # iptables/ip_forward/routing/tc, all scoped to its own netns.
       - NET_ADMIN
+      # nginx's worker calls initgroups() even as root (`user root;`).
+      - SETGID
+    # Nothing here needs a setuid binary to gain privileges.
+    security_opt:
+      - no-new-privileges:true
     sysctls:
       # Declared here (not via a runtime `sysctl -w`) because Docker keeps
       # /proc/sys read-only for non-privileged containers regardless of
@@ -120,6 +135,11 @@ services:
       # even though this exact key is one of the "namespaced" sysctls Docker
       # allows setting declaratively at container-creation time.
       - net.ipv4.ip_forward=1
+      # nginx (80) and dnsmasq (53) bind low ports without NET_BIND_SERVICE
+      # because of this, which Docker already sets by default - pinned so the
+      # cap allow-list above doesn't depend on that default (rootless/podman
+      # runtimes leave it at 1024).
+      - net.ipv4.ip_unprivileged_port_start=0
     networks:
       code-docker-internal:
         # code-docker-netinit-docker (the host-side, label-driven routing agent - see

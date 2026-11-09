@@ -124,8 +124,11 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   container has started, so a workload that begins making outbound requests before its
   route exists would otherwise get a window where it's routed nowhere in particular — see
   the plan doc's "콜드스타트 레이스" section. `router` is the only container attached to
-  both `code-docker-internal` and `code-docker-external`, `cap_add: [NET_ADMIN]` only (no
-  `privileged: true`).
+  both `code-docker-internal` and `code-docker-external`, with an allow-list of capabilities
+  (`cap_drop: [ALL]`, then `NET_ADMIN` and `SETGID` - nginx's worker calls `initgroups()` -
+  measured against every program; low ports bind via the pinned
+  `ip_unprivileged_port_start=0` sysctl instead of `NET_BIND_SERVICE`), `no-new-privileges`
+  and a default pids limit (`ROUTER_PIDS_LIMIT`, 1024). No `privileged: true`.
   - `[program:netgate-firewall]` (`config/netgate/firewall.default.sh`) loops every
     30s reading `config/netgate/config.default.yaml` (override pattern) via `yq -r`
     and translating it into iptables: an ordered `outbound:` allow/block CIDR list
