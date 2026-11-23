@@ -28,7 +28,7 @@
 # git-tracked built-in program definitions, one file per feature area) is
 # what makes that possible - see config/netgate/supervisord.default.conf's
 # own comment on the two include globs.
-FROM golang:1.25-alpine AS router-manager-build
+FROM golang:1.27-alpine AS router-manager-build
 WORKDIR /src
 COPY backend/go.mod ./
 COPY backend/go.sum ./
@@ -73,8 +73,11 @@ RUN npm run build
 # - tinyauth's own Dockerfile requires a mandatory pnpm frontend build ahead
 # of its Go build, unlike router-manager-build above, so this extracts the
 # already-built binary from upstream's official image instead of reproducing
-# that build here.
-FROM ghcr.io/tinyauthapp/tinyauth:v5 AS tinyauth-bin
+# that build here. An exact release, not :v5 - a floating tag stays at
+# whatever the build cache pulled first, and tinyauth.default.sh depends on
+# its config and CLI behavior, so a bump is a change to verify, not a side
+# effect of a rebuild.
+FROM ghcr.io/tinyauthapp/tinyauth:v5.2.0 AS tinyauth-bin
 
 FROM archlinux
 
