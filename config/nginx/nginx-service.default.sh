@@ -257,7 +257,7 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
             # so without it an internal caller just sets the header. See
             # ROUTER_NGINX_DENY_INTERNAL_MANAGER above.
             $NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE
-            proxy_pass http://unix:/run/router-manager.sock:/;
+            proxy_pass http://unix:/run/router-sock/router-manager.sock:/;
             proxy_set_header Host \$host;
             # Same WebSocket upgrade the shared hostname's own /router/
             # location needs - the VNC tab's RFB bridge lives under this
@@ -285,7 +285,7 @@ if [ -n "${ROUTER_MANAGER_HOSTS:-}" ]; then
             # this domain's root reaches router-manager's admin API
             # directly, SPA or no SPA.
             $NGINX_DENY_INTERNAL_MANAGER_DIRECTIVE
-            proxy_pass http://unix:/run/router-manager.sock:/;
+            proxy_pass http://unix:/run/router-sock/router-manager.sock:/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection \"upgrade\";
@@ -508,6 +508,9 @@ for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
                     echo "nginx-service: ROUTER_VHOST_PWA_ICON_${vhost_name} '$vhost_pwa_icon' is not a plain absolute path - ignoring the icon" >&2
                 elif [ ! -f "$vhost_pwa_icon" ]; then
                     echo "nginx-service: ROUTER_VHOST_PWA_ICON_${vhost_name} points at '$vhost_pwa_icon', which does not exist in this container - ignoring the icon (mount it under ROUTER_VOLUME)" >&2
+                # nginx's workers serve it, and they run as http, not root.
+                elif ! setpriv --reuid=http --regid=http --clear-groups test -r "$vhost_pwa_icon"; then
+                    echo "nginx-service: ROUTER_VHOST_PWA_ICON_${vhost_name} '$vhost_pwa_icon' is not readable by user http (nginx's workers) - ignoring the icon (make it and its directories world-readable)" >&2
                 else
                     vhost_pwa_icon_block="
         # The replacement icon, at the fixed path the rewritten manifest
@@ -527,7 +530,7 @@ for vhost_var in $(compgen -v ROUTER_VHOST_ 2>/dev/null); do
         location = $vhost_pwa_manifest {
             proxy_intercept_errors on;
             error_page 502 503 504 = @${vhost_pwa_key//-/_}_manifest_fallback;
-            proxy_pass http://unix:/run/router-manager.sock:/api/vhost-pwa/$vhost_pwa_key/manifest;
+            proxy_pass http://unix:/run/router-sock/router-manager.sock:/api/vhost-pwa/$vhost_pwa_key/manifest;
             proxy_set_header Host \$host;
         }
 

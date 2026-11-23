@@ -125,8 +125,8 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   route exists would otherwise get a window where it's routed nowhere in particular — see
   the plan doc's "콜드스타트 레이스" section. `router` is the only container attached to
   both `code-docker-internal` and `code-docker-external`, with an allow-list of capabilities
-  (`cap_drop: [ALL]`, then `NET_ADMIN` and `SETGID` - nginx's worker calls `initgroups()` -
-  measured against every program; low ports bind via the pinned
+  (`cap_drop: [ALL]`, then `NET_ADMIN`, plus `SETGID`/`SETUID` for nginx to drop its
+  workers to `http` - measured against every program; low ports bind via the pinned
   `ip_unprivileged_port_start=0` sysctl instead of `NET_BIND_SERVICE`), `no-new-privileges`
   and a default pids limit (`ROUTER_PIDS_LIMIT`, 1024). No `privileged: true`.
   - `[program:netgate-firewall]` (`config/netgate/firewall.default.sh`) loops every
@@ -488,7 +488,7 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
   요구" consequently never worked for anyone, for two independent reasons found live:
   Caddy sets neither `X-Forwarded-Proto` nor `X-Forwarded-Host` on a request it took over a
   **unix-socket listener** (which is every listener router actually serves through — nginx →
-  `/run/caddy-adapter.sock` and `/run/caddy-app.sock`), not even passing through ones the
+  `/run/router-sock/caddy-adapter.sock` and `/run/router-sock/caddy-app.sock`), not even passing through ones the
   incoming request already carried, and tinyauth answers **400 Bad Request** rather than 401
   when either is missing; and tinyauth signals "not logged in" with 401 +
   `X-Tinyauth-Location` rather than a 302, which `forward_auth` copies through verbatim
@@ -557,7 +557,7 @@ fragment, and vhost is a few generated nginx `server{}` blocks; see their own bu
 
 router-manager is this container's own Go backend (`backend/`, mirrors code-docker's own
 webmanager backend pattern) — this container's own nginx (not code-docker's) terminates host:80 directly and
-proxies to it over a unix socket (`/run/router-manager.sock`) under one unified `/router/`
+proxies to it over a unix socket (`/run/router-sock/router-manager.sock`) under one unified `/router/`
 location (`config/nginx/nginx.default.conf`, also serving the built SPA — see
 "router's own frontend" below); router-manager itself opens no TCP port by default
 (`ROUTER_MANAGER_ADDR` is an opt-in TCP escape hatch for local dev outside the container).

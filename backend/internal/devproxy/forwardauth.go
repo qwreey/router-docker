@@ -23,7 +23,7 @@ import "strings"
 //     it received over a **unix-socket listener** - not even passing
 //     through ones the incoming request already carried. Every Caddy
 //     listener router actually serves through is a unix socket (nginx ->
-//     /run/caddy-adapter.sock for /exports/, /run/caddy-app.sock for
+//     /run/router-sock/caddy-adapter.sock for /exports/, /run/router-sock/caddy-app.sock for
 //     /app/, see caddy-adapter.default.sh), and tinyauth answers **400 Bad
 //     Request** when either header is missing. So every auth-required
 //     request 400'd before it ever got as far as "are you logged in" -

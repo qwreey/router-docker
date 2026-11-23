@@ -336,7 +336,7 @@ ROUTER_ENV_VERSION=11
 
 #. --- 잘 안 건드리는 값들 ---
 #. router-manager 자신은 기본적으로 TCP 포트를 전혀 열지 않고 유닉스 소켓
-#. (기본 /run/router-manager.sock, ROUTER_MANAGER_SOCK로 변경 가능)만
+#. (기본 /run/router-sock/router-manager.sock, ROUTER_MANAGER_SOCK로 변경 가능)만
 #. 리슨합니다 - router 자신의 nginx가 이 소켓으로 프록시합니다. 컨테이너
 #. 밖에서 로컬 개발용으로 router-manager를 직접 띄워 TCP로 붙고 싶을 때만
 #. ROUTER_MANAGER_ADDR(예: "127.0.0.1:8090")를 설정하세요 - 설정하면

@@ -131,6 +131,18 @@ RUN mkdir -p /var/log/netgate-firewall /var/log/netgate-shaping \
         /etc/router/netgate /etc/router/dns /etc/router/supervisord.d \
         /etc/router/router-manager \
         /var/lib/code-docker-router
+# nginx's workers run as http (config/nginx/nginx.default.conf). They reach
+# router-manager and Caddy through sockets in /run/router-sock: root-owned,
+# group http by the setgid bit rather than by a chown at runtime, since the
+# container has no CAP_CHOWN. The same reason for nginx's temp dirs, all
+# made here: the master chowns them to the worker user unless they already
+# belong to it, and without CAP_DAC_OVERRIDE it can't create a missing one
+# inside an http-owned /var/lib/nginx either. Either way it won't start.
+RUN install -d -o root -g http -m 2750 /run/router-sock && \
+    install -d -o http -g http -m 700 /var/lib/nginx/client-body \
+        /var/lib/nginx/proxy /var/lib/nginx/fastcgi /var/lib/nginx/scgi \
+        /var/lib/nginx/uwsgi && \
+    chown http:http /var/lib/nginx
 COPY --chown=root:root config/netgate /etc/router/netgate
 COPY --chown=root:root config/dns /etc/router/dns
 COPY --chown=root:root config/supervisord.d /etc/router/supervisord.d

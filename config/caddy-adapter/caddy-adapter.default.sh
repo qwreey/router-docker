@@ -136,7 +136,7 @@ cat > "$ADAPTER_DIR/Caddyfile" <<EOF
 }
 
 :9999 {
-	bind unix//run/caddy-adapter.sock
+	bind unix//run/router-sock/caddy-adapter.sock|0660
 	import ${ADAPTER_DIR}/managed/*.caddy
 	handle {
 		respond 404
@@ -144,7 +144,7 @@ cat > "$ADAPTER_DIR/Caddyfile" <<EOF
 }
 ${CADDY_ADAPTER_TCP_BLOCK}
 :9998 {
-	bind unix//run/caddy-app.sock
+	bind unix//run/router-sock/caddy-app.sock|0660
 	import ${ADAPTER_DIR}/apps/*.caddy
 	handle {
 		respond 404
@@ -152,7 +152,7 @@ ${CADDY_ADAPTER_TCP_BLOCK}
 }
 
 :9997 {
-	bind unix//run/caddy-default.sock
+	bind unix//run/router-sock/caddy-default.sock|0660
 	reverse_proxy ${DEFAULT_UPSTREAM} {
 		# Same tinyauth cookie strip as every managed fragment
 		# (devproxy.StripTinyauthCookies) - the default upstream needs none of it.

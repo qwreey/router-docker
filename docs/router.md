@@ -266,7 +266,7 @@ docker run --rm ghcr.io/tinyauthapp/tinyauth:v5 user create \
 
 router는 `router-manager`라는 Go 백엔드를 갖고 있습니다(webmanager와 같은 패턴).
 router 자신의 nginx가 host:80을 직접 종단해 `/router/` 위치 하나로 모든 API를
-유닉스 소켓(`/run/router-manager.sock`) 경유로 프록시합니다 — router-manager
+유닉스 소켓(`/run/router-sock/router-manager.sock`) 경유로 프록시합니다 — router-manager
 자신은 TCP 포트를 전혀 열지 않습니다(`ROUTER_MANAGER_ADDR`는 컨테이너 밖 로컬
 개발용으로만 쓰는 opt-in 예외).
 

@@ -1,7 +1,7 @@
 // router-manager: the Go backend for router (see router/plan.md for scope).
 // Mirrors webmanager's own backend pattern (stdlib net/http, no framework).
 // Structurally private by default: binds a unix socket
-// (ROUTER_MANAGER_SOCK, default /run/router-manager.sock) rather than a TCP
+// (ROUTER_MANAGER_SOCK, default /run/router-sock/router-manager.sock) rather than a TCP
 // port, so there is no address for another container to reach at all -
 // only router's own nginx (same container/netns) proxies to it. See
 // router/.claude/router-nginx-hardening-plan.md for why the previous
@@ -373,7 +373,7 @@ func normalizeCaddyFragments() {
 var listenerIsUnix bool
 
 // listen binds a unix socket by default (ROUTER_MANAGER_SOCK, default
-// /run/router-manager.sock). Setting ROUTER_MANAGER_ADDR is an explicit
+// /run/router-sock/router-manager.sock). Setting ROUTER_MANAGER_ADDR is an explicit
 // opt-in to bind TCP instead - useful for local development outside a
 // container, where nothing else in router's own netns would otherwise
 // reach a unix socket anyway.
@@ -385,7 +385,7 @@ func listen() (net.Listener, error) {
 	listenerIsUnix = true
 	sockPath := os.Getenv("ROUTER_MANAGER_SOCK")
 	if sockPath == "" {
-		sockPath = "/run/router-manager.sock"
+		sockPath = "/run/router-sock/router-manager.sock"
 	}
 	// /run is container-local tmpfs, but that only guarantees a clean slate
 	// across a full container recreate, not every restart - `docker compose
@@ -402,9 +402,10 @@ func listen() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 0o660: readable/writable by the socket's owner and group (router's
-	// own nginx runs in the same container, typically as root like every
-	// other supervisord program here - see router/config/supervisord.d/).
+	// 0o660: readable/writable by the socket's owner and group. In the
+	// default directory the group is http, nginx's workers (see the
+	// Dockerfile's /run/router-sock); a ROUTER_MANAGER_SOCK elsewhere is
+	// reachable by root alone.
 	if err := os.Chmod(sockPath, 0o660); err != nil {
 		l.Close()
 		return nil, err

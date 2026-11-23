@@ -123,8 +123,10 @@ services:
     cap_add:
       # iptables/ip_forward/routing/tc, all scoped to its own netns.
       - NET_ADMIN
-      # nginx's worker calls initgroups() even as root (`user root;`).
+      # nginx's master drops its workers to `http` (initgroups, setgid,
+      # setuid). The workers end up with no capability at all.
       - SETGID
+      - SETUID
     # Nothing here needs a setuid binary to gain privileges.
     security_opt:
       - no-new-privileges:true
